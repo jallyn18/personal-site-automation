@@ -213,6 +213,13 @@ nothing.
 **`terraform validate` fails in step 3.** Send me the error. That is the one
 thing in this stack never checked against real provider schemas.
 
+**The plan succeeds but the apply fails on
+"sts:AssumeRoleWithWebIdentity".** A job that declares an `environment:` gets an
+OIDC subject claim of `environment:<name>` *instead of* `ref:<ref>` — the ref is
+replaced, not supplemented. The apply job runs in the `production` environment
+and the plan job does not, which is why only one of them fails. The bootstrap
+template names the environment explicitly; update the stack if it predates that.
+
 **"Not authorized to perform sts:AssumeRoleWithWebIdentity" in the terraform
 job.** The trust policy did not match the token. In order:
 
