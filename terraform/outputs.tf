@@ -1,6 +1,15 @@
 output "nameservers" {
-  description = "Set these as the NS records at your registrar to delegate the domain to Route53."
-  value       = aws_route53_zone.primary.name_servers
+  description = <<-EOT
+    The hosted zone's nameservers. Set these at your registrar when this stack
+    created the zone. When the zone was adopted via route53_zone_id, delegation
+    is already whatever it was -- these are informational.
+  EOT
+  value       = local.zone_name_servers
+}
+
+output "zone_id" {
+  description = "Hosted zone id in use, whether created here or adopted."
+  value       = local.zone_id
 }
 
 output "site_url" {

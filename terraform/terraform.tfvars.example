@@ -3,6 +3,17 @@
 domain_name = "jon-allyn.com"
 alert_email = "REPLACE-ME@example.com" # receives budget and alarm notifications
 
+# Adopt an existing hosted zone instead of creating one. The stack then publishes
+# records into it without owning it, so `terraform destroy` cannot delete the
+# domain's DNS. Leave unset to have Terraform create and own the zone.
+#
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+# Publish SPF and DMARC saying this domain sends no mail. Off by default: on a
+# domain that does send mail, "v=spf1 -all" tells receivers to reject all of it.
+#
+# manage_email_dns = true
+
 # First apply, before your registrar points at Route53: set this to false so ACM
 # validation does not block. Flip to true once `terraform output nameservers`
 # has been applied at the registrar and delegation has propagated.
