@@ -15,12 +15,10 @@ permissions:
   id-token: write
   issues: write
 
+# Regions are resolved inline at each use. See the note in terraform.yml.
 env:
   TF_VERSION: "1.13.3"
   TF_IN_AUTOMATION: "true"
-  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  # See the note in terraform.yml: state can live in a different region.
-  TF_STATE_REGION: ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}
 
 concurrency:
   group: terraform-refs/heads/main
@@ -35,7 +33,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           role-session-name: gha-drift-${{ github.run_id }}
 
       - uses: hashicorp/setup-terraform@v3
@@ -47,7 +45,7 @@ jobs:
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ env.TF_STATE_REGION }}" \
+            -backend-config="region=${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform
@@ -59,7 +57,7 @@ jobs:
           set +e
           terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode \
             -var-file=ci.tfvars \
-            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="aws_region=${{ vars.AWS_REGION || 'us-east-1' }}" \
             -var="domain_name=${{ vars.DOMAIN_NAME }}" \
             -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
             -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \

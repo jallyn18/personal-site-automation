@@ -24,19 +24,18 @@ permissions:
   id-token: write        # required to mint the OIDC token
   pull-requests: write   # required to post the plan comment
 
+# Two independent regions, both resolved inline at each use rather than hoisted
+# into `env:` here. Workflow-level env has restricted context access, and an
+# expression that silently resolves to empty is worse than a repeated one: the
+# backend quietly falls back to the credentials region and S3 answers the
+# cross-region request with a 301 the SDK will not follow.
+#
+#   vars.AWS_REGION        where the infrastructure is created (default us-east-1)
+#   vars.TF_STATE_REGION   where the state bucket lives, i.e. whichever region
+#                          the bootstrap CloudFormation stack was deployed to
 env:
   TF_VERSION: "1.13.3"
   TF_IN_AUTOMATION: "true"
-
-  # Where the infrastructure lives.
-  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-
-  # Where Terraform state lives, which is wherever the bootstrap CloudFormation
-  # stack was deployed -- not necessarily the same region, and easy to get wrong
-  # because the console remembers whatever region you last used. S3 answers a
-  # cross-region request with a 301 that the SDK will not follow, so this has to
-  # be exact rather than merely close.
-  TF_STATE_REGION: ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}
 
 # Never let two applies touch the same state at once. Plans are cancellable;
 # an in-flight apply is not.
@@ -86,19 +85,33 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           role-session-name: gha-terraform-plan-${{ github.run_id }}
 
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      # Prints what the expressions above actually resolved to. An unset or
+      # wrongly-scoped repository variable is otherwise invisible until it
+      # surfaces as a confusing error several steps later.
+      - name: Show resolved configuration
+        run: |
+          echo "state bucket   : ${{ vars.TF_STATE_BUCKET }}"
+          echo "state region   : ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}"
+          echo "deploy region  : ${{ vars.AWS_REGION || 'us-east-1' }}"
+          echo "domain         : ${{ vars.DOMAIN_NAME }}"
+          echo "custom domain  : ${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}"
+          echo "oidc provider  : ${{ vars.AWS_OIDC_PROVIDER_ARN }}"
+          echo "caller identity:"
+          aws sts get-caller-identity
+
       - name: terraform init
         run: |
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ env.TF_STATE_REGION }}" \
+            -backend-config="region=${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform
@@ -109,7 +122,7 @@ jobs:
           set +e
           terraform plan -input=false -no-color -lock-timeout=5m \
             -var-file=ci.tfvars \
-            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="aws_region=${{ vars.AWS_REGION || 'us-east-1' }}" \
             -var="domain_name=${{ vars.DOMAIN_NAME }}" \
             -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
             -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \
@@ -156,7 +169,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           role-session-name: gha-terraform-apply-${{ github.run_id }}
 
       - uses: hashicorp/setup-terraform@v3
@@ -168,7 +181,7 @@ jobs:
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ env.TF_STATE_REGION }}" \
+            -backend-config="region=${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform
