@@ -104,6 +104,20 @@ variable "existing_oidc_provider_arn" {
   }
 }
 
+variable "create_terraform_role" {
+  description = <<-EOT
+    Create the IAM role GitHub Actions assumes in order to run Terraform.
+
+    Set to false when that role comes from bootstrap/cloudformation.yaml, which
+    is the case whenever the pipeline rather than a workstation runs Terraform:
+    the role cannot be created by the Terraform run that needs it to exist.
+
+    terraform/ci.tfvars sets this to false for the GitHub Actions path.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "alert_email" {
   description = "Address that receives budget and CloudWatch alarm notifications. Requires confirming an SNS subscription email."
   type        = string

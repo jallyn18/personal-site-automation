@@ -1,0 +1,263 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  One-time bootstrap for personal-site. Creates the three things Terraform
+  cannot create for itself: the GitHub OIDC trust relationship, the IAM role
+  the pipeline assumes, and the S3 bucket that holds Terraform state.
+
+  Deploy this once from the AWS console (CloudFormation -> Create stack ->
+  Upload a template file). Everything else in this account is managed by
+  Terraform, applied by GitHub Actions.
+
+  Why CloudFormation and not Terraform: Terraform cannot store its state
+  before its state store exists, and GitHub Actions cannot assume a role that
+  does not exist yet. Some resource has to be created out of band. Doing it
+  declaratively in a template you can read beats clicking through the IAM
+  console and hoping you got the trust policy right.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Repositories
+        Parameters:
+          - GitHubOwner
+          - AutomationRepo
+          - AllowedRefPattern
+      - Label:
+          default: Naming
+        Parameters:
+          - ProjectName
+      - Label:
+          default: Existing OIDC provider
+        Parameters:
+          - CreateOidcProvider
+          - ExistingOidcProviderArn
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Default: jallyn18
+    Description: GitHub user or organisation that owns the repositories.
+
+  AutomationRepo:
+    Type: String
+    Default: personal-site-automation
+    Description: >-
+      Repository holding the Terraform. Only workflows in this repository can
+      assume the role created here.
+
+  AllowedRefPattern:
+    Type: String
+    Default: refs/heads/*
+    Description: >-
+      Which branches may assume the role. The default allows any branch so you
+      can run a plan on a feature branch before merging; the apply job is
+      separately gated to the default branch inside the workflow. Tighten this
+      to refs/heads/main once you no longer need branch plans.
+
+  ProjectName:
+    Type: String
+    Default: personal-site
+    AllowedPattern: "^[a-z][a-z0-9-]{2,31}$"
+    Description: >-
+      Must match the `project` variable in the Terraform. Used to name the
+      state bucket and to scope what the role may do to IAM.
+
+  CreateOidcProvider:
+    Type: String
+    Default: "Yes"
+    AllowedValues: ["Yes", "No"]
+    Description: >-
+      AWS allows exactly one OIDC provider per issuer URL per account. Choose No
+      if this account already has one for GitHub, and supply its ARN below.
+
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: Required only when CreateOidcProvider is No.
+
+Conditions:
+  ShouldCreateOidcProvider: !Equals [!Ref CreateOidcProvider, "Yes"]
+
+Resources:
+  # AWS validates this issuer's certificate against its own trust store, so the
+  # thumbprint is vestigial -- but the API still requires a well-formed one.
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    # State is the one thing worth refusing to delete by accident. Deleting this
+    # stack leaves the bucket behind rather than taking the state with it.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-tfstate-${AWS::AccountId}"
+      # Versioning is what makes a truncated or corrupted state recoverable.
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-state-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+              NewerNoncurrentVersions: 20
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: ManagedBy
+          Value: cloudformation
+        - Key: Component
+          Value: tfstate
+
+  TerraformStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TerraformStateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt TerraformStateBucket.Arn
+              - !Sub "${TerraformStateBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  TerraformRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-gha-terraform"
+      Description: >-
+        Assumed by GitHub Actions to manage the personal-site stack. No
+        long-lived credentials exist for this role.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              # Scoped to one repository. A fork cannot mint a token that
+              # matches, and the workflow additionally refuses to run the plan
+              # job for pull requests originating outside this repository.
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOwner}/${AutomationRepo}:${AllowedRefPattern}"
+                  - !Sub "repo:${GitHubOwner}/${AutomationRepo}:pull_request"
+      ManagedPolicyArns:
+        # Terraform genuinely needs broad rights to manage what it creates.
+        # Hand-maintaining an allowlist for this is a treadmill that ends at "*"
+        # anyway; the real controls are the trust policy above, the apply gate
+        # in the workflow, and the budget alarm.
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Policies:
+        # PowerUserAccess deliberately excludes IAM, which this stack needs in
+        # order to manage its own roles. Granted narrowly by name prefix rather
+        # than by attaching IAMFullAccess.
+        - PolicyName: iam-and-billing
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateRoleDescription
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRoleTags
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-*"
+
+              - Effect: Allow
+                Action:
+                  - iam:ListRoles
+                  - iam:GetOpenIDConnectProvider
+                  - iam:ListOpenIDConnectProviders
+                Resource: "*"
+
+              # Budgets and Cost Explorer sit outside PowerUserAccess.
+              - Effect: Allow
+                Action:
+                  - budgets:*
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                Resource: "*"
+
+        - PolicyName: terraform-state
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
+                Resource: !GetAtt TerraformStateBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${TerraformStateBucket.Arn}/*"
+
+Outputs:
+  TerraformRoleArn:
+    Description: Set as the AWS_TERRAFORM_ROLE_ARN variable in the automation repository.
+    Value: !GetAtt TerraformRole.Arn
+
+  StateBucket:
+    Description: Set as the TF_STATE_BUCKET variable in the automation repository.
+    Value: !Ref TerraformStateBucket
+
+  OidcProviderArn:
+    Description: Set as the AWS_OIDC_PROVIDER_ARN variable in the automation repository.
+    Value: !If
+      - ShouldCreateOidcProvider
+      - !Ref GitHubOidcProvider
+      - !Ref ExistingOidcProviderArn

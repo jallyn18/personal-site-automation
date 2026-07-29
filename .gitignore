@@ -13,6 +13,8 @@ crash.*.log
 *.tfvars
 *.tfvars.json
 !*.tfvars.example
+# ci.tfvars holds no secrets -- see the comment at the top of it.
+!terraform/ci.tfvars
 backend.hcl
 
 # Lambda zips are built from source on every plan.

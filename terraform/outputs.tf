@@ -29,8 +29,12 @@ output "deploy_role_arn" {
 }
 
 output "terraform_role_arn" {
-  description = "Set as AWS_TERRAFORM_ROLE_ARN in this repository's Actions variables."
-  value       = aws_iam_role.terraform.arn
+  description = <<-EOT
+    Set as AWS_TERRAFORM_ROLE_ARN in this repository's Actions variables.
+    Null when the role is managed by bootstrap/cloudformation.yaml -- take the
+    value from that stack's TerraformRoleArn output instead.
+  EOT
+  value       = one(aws_iam_role.terraform[*].arn)
 }
 
 output "metrics_table" {

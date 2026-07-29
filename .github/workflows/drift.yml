@@ -56,8 +56,11 @@ jobs:
         run: |
           set +e
           terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode \
+            -var-file=ci.tfvars \
             -var="domain_name=${{ vars.DOMAIN_NAME }}" \
             -var="alert_email=${{ vars.ALERT_EMAIL }}" \
+            -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \
+            -var="enable_custom_domain=${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}" \
             > plan.txt 2>&1
           echo "exitcode=$?" >> "$GITHUB_OUTPUT"
         working-directory: terraform

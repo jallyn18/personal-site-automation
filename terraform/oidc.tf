@@ -15,8 +15,15 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 # --- infrastructure role (personal-site-automation) ---------------------------
+#
+# Only created when Terraform is run from a workstation. When GitHub Actions
+# runs Terraform, this role has to exist before the run starts, so it comes
+# from bootstrap/cloudformation.yaml instead and create_terraform_role is false.
+# The role name is identical either way.
 
 data "aws_iam_policy_document" "terraform_assume_role" {
+  count = var.create_terraform_role ? 1 : 0
+
   statement {
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -46,9 +53,11 @@ data "aws_iam_policy_document" "terraform_assume_role" {
 }
 
 resource "aws_iam_role" "terraform" {
+  count = var.create_terraform_role ? 1 : 0
+
   name                 = "${local.name}-gha-terraform"
   description          = "Assumed by GitHub Actions in ${var.automation_repo} to manage this stack"
-  assume_role_policy   = data.aws_iam_policy_document.terraform_assume_role.json
+  assume_role_policy   = data.aws_iam_policy_document.terraform_assume_role[0].json
   max_session_duration = 3600
 }
 
@@ -57,13 +66,17 @@ resource "aws_iam_role" "terraform" {
 # "*" anyway; the honest control is that only this repo's default branch and PRs
 # can assume the role, plus the budget alarm below.
 resource "aws_iam_role_policy_attachment" "terraform_power" {
-  role       = aws_iam_role.terraform.name
+  count = var.create_terraform_role ? 1 : 0
+
+  role       = aws_iam_role.terraform[0].name
   policy_arn = "arn:${local.partition}:iam::aws:policy/PowerUserAccess"
 }
 
 # PowerUserAccess deliberately excludes IAM, which this stack needs in order to
 # manage its own roles. Granted narrowly rather than by attaching IAMFullAccess.
 data "aws_iam_policy_document" "terraform_iam" {
+  count = var.create_terraform_role ? 1 : 0
+
   statement {
     effect = "Allow"
     actions = [
@@ -115,9 +128,11 @@ data "aws_iam_policy_document" "terraform_iam" {
 }
 
 resource "aws_iam_role_policy" "terraform_iam" {
+  count = var.create_terraform_role ? 1 : 0
+
   name   = "iam-and-billing"
-  role   = aws_iam_role.terraform.id
-  policy = data.aws_iam_policy_document.terraform_iam.json
+  role   = aws_iam_role.terraform[0].id
+  policy = data.aws_iam_policy_document.terraform_iam[0].json
 }
 
 # --- deploy role (personal-site-gatsby) ---------------------------------------
@@ -155,6 +170,15 @@ resource "aws_iam_role" "deploy" {
   description          = "Assumed by GitHub Actions in ${var.site_repo} to publish the built site"
   assume_role_policy   = data.aws_iam_policy_document.deploy_assume_role.json
   max_session_duration = 3600
+
+  # Without this the failure is a confusing "Invalid principal" from the IAM
+  # API rather than a statement of what is actually missing.
+  lifecycle {
+    precondition {
+      condition     = local.oidc_provider_arn != null && local.oidc_provider_arn != ""
+      error_message = "No GitHub OIDC provider. Either set create_github_oidc_provider = true, or pass existing_oidc_provider_arn using the OidcProviderArn output from the bootstrap CloudFormation stack."
+    }
+  }
 }
 
 data "aws_iam_policy_document" "deploy" {

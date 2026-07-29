@@ -141,63 +141,49 @@ require a human approval.
 
 ## Setup
 
-Prerequisites: an AWS account, Terraform >= 1.11, Python 3.12+, and a domain you
-control.
+**[docs/GETTING-LIVE.md](docs/GETTING-LIVE.md) is the step-by-step runbook.**
+Short version below.
 
-**1. Create the state bucket.** This is the one piece that cannot store its own
-state remotely, so it runs by hand, once:
+### The bootstrap problem
 
-```bash
-make bootstrap
-```
+Terraform cannot store state before its state bucket exists, and GitHub Actions
+cannot assume a role that has not been created yet. Something must come from
+outside Terraform.
 
-Copy the `backend_config` output into `terraform/backend.hcl`.
+`bootstrap/cloudformation.yaml` is that something. Deployed once from the AWS
+console, it creates exactly three things — the GitHub OIDC provider, the role
+the pipeline assumes, and the state bucket — and nothing else. The alternative
+is putting AWS access keys in GitHub secrets to bootstrap and then removing
+them; this avoids that, so **no long-lived AWS credentials exist at any point.**
 
-**2. Configure the stack.**
+### From nothing to deployed
 
-```bash
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# set domain_name and alert_email
-```
+1. **Deploy the bootstrap stack** in the CloudFormation console. Note its three
+   outputs.
+2. **Set repository variables** in this repo: `AWS_TERRAFORM_ROLE_ARN`,
+   `TF_STATE_BUCKET`, `AWS_OIDC_PROVIDER_ARN`, `DOMAIN_NAME`, `ALERT_EMAIL`.
+   Variables rather than secrets — a role ARN grants nothing on its own.
+3. **Run the terraform workflow on a branch.** It validates and plans without
+   applying, so you can read the plan before anything changes.
+4. **Merge to `main`.** Plan runs again and applies.
+5. **Set `AWS_DEPLOY_ROLE_ARN`** in the site repository and merge there. The
+   site deploys.
+6. **Delegate the domain**, then set `ENABLE_CUSTOM_DOMAIN=true` and re-run.
 
-If your registrar is not yet delegating to Route53, set
-`enable_custom_domain = false` for the first apply. ACM validation blocks until
-the DNS records resolve publicly, and a blocked apply times out after ~45
-minutes.
-
-**3. Apply.**
-
-```bash
-make init
-make apply
-```
-
-**4. Delegate the domain.** Point your registrar's nameservers at the four
-values from:
-
-```bash
-make nameservers
-```
-
-Once delegation resolves, set `enable_custom_domain = true` and apply again.
-
-**5. Confirm the alert subscription.** AWS emails a confirmation link for the
-SNS topic. Until it is clicked, alarms fire into the void.
-
-**6. Wire up GitHub.** Set these as repository *variables* (not secrets — none
-of them are sensitive):
-
-| Repository | Variable | Value from |
-| --- | --- | --- |
-| this repo | `AWS_TERRAFORM_ROLE_ARN` | `terraform output terraform_role_arn` |
-| this repo | `TF_STATE_BUCKET` | bootstrap's `state_bucket` output |
-| this repo | `DOMAIN_NAME` | your domain |
-| this repo | `ALERT_EMAIL` | your email |
-| site repo | `AWS_DEPLOY_ROLE_ARN` | `terraform output deploy_role_arn` |
+`terraform/ci.tfvars` records that the OIDC provider and Terraform role are
+CloudFormation-managed on this path. Everything else — the domain, the alert
+address, the provider ARN — arrives as repository variables.
 
 The site repository discovers the bucket name, distribution id, and site URL
 from SSM Parameter Store at deploy time, so nothing about the infrastructure is
 duplicated into it.
+
+### Running Terraform from a workstation instead
+
+`scripts/setup.sh` drives the whole sequence locally: it validates, creates the
+state bucket with `terraform/bootstrap`, writes `backend.hcl`, and applies. On
+that path Terraform creates the role and state bucket itself — leave
+`create_terraform_role` at its default and do not pass `ci.tfvars`.
 
 ## Local development
 
@@ -214,8 +200,11 @@ test that escapes moto fails loudly rather than reaching a real account.
 ## Layout
 
 ```
+bootstrap/
+  cloudformation.yaml  OIDC provider, pipeline role, state bucket; console-deployed once
 terraform/
-  bootstrap/        state bucket; local state, applied by hand
+  bootstrap/        same three-ish resources for the local path; local state
+  ci.tfvars         records what CloudFormation owns on the pipeline path
   cloudfront.tf     distribution, OACs, edge function, security headers
   dns.tf            hosted zone, ACM certificate, alias records
   s3.tf             site bucket and its policies
