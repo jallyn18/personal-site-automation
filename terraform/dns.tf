@@ -12,14 +12,14 @@
 # complete, which is what enable_custom_domain exists to work around.
 
 resource "aws_route53_zone" "primary" {
-  count = var.route53_zone_id == null ? 1 : 0
+  count = var.route53_zone_id == "" ? 1 : 0
 
   name    = var.domain_name
   comment = "Managed by ${var.github_owner}/${var.automation_repo}"
 }
 
 data "aws_route53_zone" "existing" {
-  count = var.route53_zone_id == null ? 0 : 1
+  count = var.route53_zone_id == "" ? 0 : 1
 
   zone_id = var.route53_zone_id
 

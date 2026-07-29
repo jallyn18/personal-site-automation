@@ -123,6 +123,8 @@ jobs:
             -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
             -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \
             -var="enable_custom_domain=${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}" \
+            -var="route53_zone_id=${{ vars.ROUTE53_ZONE_ID }}" \
+            -var="manage_email_dns=${{ vars.MANAGE_EMAIL_DNS || 'false' }}" \
             -out=tfplan
           echo "exitcode=$?" >> "$GITHUB_OUTPUT"
         working-directory: terraform

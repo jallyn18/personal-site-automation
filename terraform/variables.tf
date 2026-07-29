@@ -33,7 +33,7 @@ variable "route53_zone_id" {
   description = <<-EOT
     Id of an existing Route53 hosted zone for domain_name, e.g. "Z0123456789ABCDEFGHIJ".
 
-    Leave null to have this stack create and own the zone. Set it when the zone
+    Leave empty to have this stack create and own the zone. Set it when the zone
     already exists -- registered through Route53, or created by hand -- and the
     stack should publish records into it without owning it. The zone is then read
     as a data source, so `terraform destroy` cannot take the domain's DNS with it.
@@ -43,11 +43,13 @@ variable "route53_zone_id" {
     duplicate, but check that nothing is delegated to it first.
   EOT
   type        = string
-  default     = null
+  default     = ""
 
   validation {
-    condition     = var.route53_zone_id == null || can(regex("^Z[A-Z0-9]+$", var.route53_zone_id))
-    error_message = "route53_zone_id must look like a Route53 zone id, e.g. Z0123456789ABCDEFGHIJ."
+    # Empty rather than null so CI can pass the flag unconditionally; an unset
+    # repository variable arrives as an empty string, not as an absent argument.
+    condition     = var.route53_zone_id == "" || can(regex("^Z[A-Z0-9]+$", var.route53_zone_id))
+    error_message = "route53_zone_id must be empty or look like a Route53 zone id, e.g. Z0123456789ABCDEFGHIJ."
   }
 }
 
