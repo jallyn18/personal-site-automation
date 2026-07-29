@@ -1,0 +1,183 @@
+name: terraform
+
+# Plan on every pull request, apply on merge to the default branch.
+#
+# Authentication is OIDC only: the job exchanges a short-lived GitHub token for
+# AWS credentials. There are no access keys in this repository's secrets.
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "lambdas/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "lambdas/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write        # required to mint the OIDC token
+  pull-requests: write   # required to post the plan comment
+
+env:
+  TF_VERSION: "1.13.3"
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+
+# Never let two applies touch the same state at once. Plans are cancellable;
+# an in-flight apply is not.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: fmt + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      # No backend, no credentials: this is a pure syntax and type check, so it
+      # runs even on pull requests from forks.
+      - name: terraform init (no backend)
+        run: terraform init -backend=false -input=false
+        working-directory: terraform
+
+      - name: terraform validate
+        run: terraform validate -no-color
+        working-directory: terraform
+
+      - name: terraform validate (bootstrap)
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate -no-color
+        working-directory: terraform/bootstrap
+
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    needs: validate
+    # Fork PRs cannot assume the role, and should not be able to.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-terraform-plan-${{ github.run_id }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=personal-site/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+        working-directory: terraform
+
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock-timeout=5m \
+            -var="domain_name=${{ vars.DOMAIN_NAME }}" \
+            -var="alert_email=${{ vars.ALERT_EMAIL }}" \
+            -out=tfplan
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+        working-directory: terraform
+
+      - name: Render plan summary
+        if: always()
+        run: |
+          {
+            echo '## Terraform plan'
+            echo
+            echo '```terraform'
+            terraform show -no-color tfplan 2>/dev/null | head -300 || echo '(plan unavailable)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        working-directory: terraform
+
+      - name: Fail if plan errored
+        if: steps.plan.outputs.exitcode != '0'
+        run: exit 1
+
+      # The plan file references the exact state it was generated against, so
+      # apply replays this artifact rather than re-planning against a moved target.
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: tfplan
+          path: terraform/tfplan
+          retention-days: 5
+
+  apply:
+    name: apply
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Add required reviewers to this environment in repo settings to gate applies.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-terraform-apply-${{ github.run_id }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=personal-site/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+        working-directory: terraform
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform
+
+      - name: terraform apply
+        run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
+        working-directory: terraform
+
+      - name: Publish outputs
+        run: |
+          {
+            echo '## Applied'
+            echo
+            echo '| Output | Value |'
+            echo '| --- | --- |'
+            echo "| Site | $(terraform output -raw site_url) |"
+            echo "| Distribution | $(terraform output -raw distribution_id) |"
+            echo "| Bucket | $(terraform output -raw site_bucket) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+        working-directory: terraform

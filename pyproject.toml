@@ -1,0 +1,65 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".build"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle
+  "F",    # pyflakes
+  "W",    # warnings
+  "I",    # import sorting
+  "N",    # pep8 naming
+  "UP",   # pyupgrade
+  "B",    # bugbear
+  "A",    # builtin shadowing
+  "C4",   # comprehensions
+  "ARG",  # unused arguments
+  "SIM",  # simplify
+  "S",    # bandit
+  "BLE",  # blind except
+  "RUF",
+]
+ignore = [
+  # The uptime prober fetches exactly one hard-coded https URL from an
+  # environment variable; the "audit URL open" rule has nothing to catch here.
+  "S310",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+  "S101",    # assert is the point of a test
+  "ARG001",  # pytest fixtures arrive as unused-looking arguments
+  "ARG002",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["conftest"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+# Each Lambda directory is its own deployment package and they all contain a
+# module named `handler`, so mypy is pointed at files rather than packages.
+explicit_package_bases = true
+mypy_path = "lambdas"
+
+[[tool.mypy.overrides]]
+module = ["boto3.*", "botocore.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["lambdas"]
+omit = ["*/.build/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]

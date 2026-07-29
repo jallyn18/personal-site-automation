@@ -1,0 +1,15 @@
+# Local and CI tooling only. The Lambda functions themselves have no
+# dependencies beyond boto3, which the Python 3.12 runtime already provides --
+# that is why the deployment packages are a single .py file each and need no
+# build step.
+
+boto3==1.40.47
+botocore==1.40.47
+
+pytest==8.4.2
+pytest-cov==7.0.0
+moto[dynamodb]==5.1.16
+
+ruff==0.14.2
+mypy==1.18.2
+boto3-stubs[dynamodb,ce]==1.40.47

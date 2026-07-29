@@ -1,0 +1,9 @@
+# Copy to backend.hcl and fill in. backend.hcl is gitignored.
+#
+#   terraform init -backend-config=backend.hcl
+
+bucket       = "REPLACE-ME-tfstate-123456789012"
+key          = "personal-site/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true

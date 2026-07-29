@@ -1,0 +1,122 @@
+name: drift
+
+# Infrastructure changes out of band -- a console click during an incident, a
+# resource deleted by hand, an AWS-side default that moved. This job runs a
+# read-only plan on a schedule and opens an issue when reality stops matching
+# the code.
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # daily, 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  TF_VERSION: "1.13.3"
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
+
+concurrency:
+  group: terraform-refs/heads/main
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-drift-${{ github.run_id }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=personal-site/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+        working-directory: terraform
+
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = drift detected.
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode \
+            -var="domain_name=${{ vars.DOMAIN_NAME }}" \
+            -var="alert_email=${{ vars.ALERT_EMAIL }}" \
+            > plan.txt 2>&1
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+        working-directory: terraform
+
+      - name: Capture plan
+        id: capture
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          {
+            echo 'summary<<PLAN_EOF'
+            head -200 terraform/plan.txt
+            echo 'PLAN_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open drift issue
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        env:
+          PLAN_SUMMARY: ${{ steps.capture.outputs.summary }}
+        with:
+          script: |
+            const title = 'Infrastructure drift detected';
+            const body = [
+              'The scheduled plan found differences between the committed Terraform and the live account.',
+              '',
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '',
+              '```terraform',
+              process.env.PLAN_SUMMARY || '(plan output unavailable)',
+              '```',
+            ].join('\n');
+
+            // Reuse the open issue rather than filing a new one every morning.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'drift',
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['drift'],
+              });
+            }
+
+      - name: Fail the run when the plan errored
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          cat terraform/plan.txt
+          exit 1

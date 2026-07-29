@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (gitignored) or pass with -var-file.
+
+domain_name = "REPLACE-ME.com"
+alert_email = "you@example.com"
+
+# First apply, before your registrar points at Route53: set this to false so ACM
+# validation does not block. Flip to true once `terraform output nameservers`
+# has been applied at the registrar and delegation has propagated.
+enable_custom_domain = true
+
+aws_region      = "us-east-1"
+github_owner    = "jallyn18"
+site_repo       = "personal-site-gatsby"
+automation_repo = "personal-site-automation"
+
+monthly_budget_usd        = 10
+uptime_check_rate_minutes = 5

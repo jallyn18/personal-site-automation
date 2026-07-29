@@ -1,0 +1,71 @@
+name: python
+
+on:
+  pull_request:
+    paths:
+      - "lambdas/**"
+      - "tests/**"
+      - "requirements-dev.txt"
+      - "pytest.ini"
+      - ".github/workflows/python.yml"
+  push:
+    branches: [main]
+    paths:
+      - "lambdas/**"
+      - "tests/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the Lambda runtime; 3.13 is an early warning for the next one.
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check lambdas tests
+
+      - name: Format check
+        run: ruff format --check lambdas tests
+
+      - name: Type check
+        run: mypy lambdas
+
+      # No AWS credentials are configured for this job: moto intercepts every
+      # boto3 call, and the fake credentials in conftest guarantee that a test
+      # which escapes moto fails rather than touching a real account.
+      - name: Test
+        run: pytest --cov=lambdas --cov-report=term-missing --cov-report=xml
+
+      - name: Coverage summary
+        if: matrix.python-version == '3.12'
+        run: |
+          {
+            echo '## Coverage'
+            echo '```'
+            coverage report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
