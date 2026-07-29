@@ -224,6 +224,7 @@ Resources:
                   - iam:GetRole
                   - iam:UpdateRole
                   - iam:UpdateRoleDescription
+                  - iam:UpdateAssumeRolePolicy
                   - iam:PassRole
                   - iam:TagRole
                   - iam:UntagRole
