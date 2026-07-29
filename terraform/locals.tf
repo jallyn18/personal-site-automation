@@ -12,6 +12,11 @@ locals {
   # without leaking anything sensitive.
   site_bucket_name = "${var.project}-site-${local.account_id}"
 
+  # Whichever zone is in play -- created here, or adopted via route53_zone_id.
+  zone_id = var.route53_zone_id == "" ? aws_route53_zone.primary[0].zone_id : data.aws_route53_zone.existing[0].zone_id
+
+  zone_name_servers = var.route53_zone_id == "" ? aws_route53_zone.primary[0].name_servers : data.aws_route53_zone.existing[0].name_servers
+
   www_domain = "www.${var.domain_name}"
 
   subject_alternative_names = coalesce(var.subject_alternative_names, [local.www_domain])

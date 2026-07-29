@@ -29,6 +29,46 @@ variable "domain_name" {
   }
 }
 
+variable "route53_zone_id" {
+  description = <<-EOT
+    Id of an existing Route53 hosted zone for domain_name, e.g. "Z0123456789ABCDEFGHIJ".
+
+    Leave empty to have this stack create and own the zone. Set it when the zone
+    already exists -- registered through Route53, or created by hand -- and the
+    stack should publish records into it without owning it. The zone is then read
+    as a data source, so `terraform destroy` cannot take the domain's DNS with it.
+
+    Setting this on a stack that already created a zone will destroy that zone on
+    the next apply. That is the intended behaviour when the created zone was a
+    duplicate, but check that nothing is delegated to it first.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    # Empty rather than null so CI can pass the flag unconditionally; an unset
+    # repository variable arrives as an empty string, not as an absent argument.
+    condition     = var.route53_zone_id == "" || can(regex("^Z[A-Z0-9]+$", var.route53_zone_id))
+    error_message = "route53_zone_id must be empty or look like a Route53 zone id, e.g. Z0123456789ABCDEFGHIJ."
+  }
+}
+
+variable "manage_email_dns" {
+  description = <<-EOT
+    Publish SPF and DMARC records declaring that this domain sends no mail.
+
+    Default off because it is destructive to a domain that does send mail:
+    "v=spf1 -all" instructs receivers to reject everything from it, and the apex
+    TXT record would overwrite anything already there, including domain
+    verification tokens.
+
+    Safe to enable on a zone this stack created. On an adopted zone, check what
+    is already published first.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "enable_custom_domain" {
   description = <<-EOT
     Attach the custom domain + ACM certificate to CloudFront.

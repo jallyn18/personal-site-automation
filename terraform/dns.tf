@@ -1,11 +1,36 @@
-# Route53 hosted zone for a domain registered elsewhere. After the first apply,
-# copy the `nameservers` output into your registrar's NS records. Until that
-# delegation propagates, ACM validation cannot complete -- which is why
-# enable_custom_domain exists as an escape hatch.
+# The hosted zone is either created here or adopted from one that already
+# exists, depending on whether route53_zone_id is set.
+#
+# Adopting is a data source rather than an imported resource on purpose. A zone
+# that predates this stack -- created by a Route53 domain registration, or by
+# hand -- outlives it too, and `terraform destroy` should not be able to delete
+# the DNS for a domain this stack merely publishes a website on. Terraform
+# manages the records it owns inside the zone; it does not own the zone.
+#
+# When creating, copy the `nameservers` output into your registrar's NS records
+# after the first apply. Until that delegation propagates ACM validation cannot
+# complete, which is what enable_custom_domain exists to work around.
 
 resource "aws_route53_zone" "primary" {
+  count = var.route53_zone_id == "" ? 1 : 0
+
   name    = var.domain_name
   comment = "Managed by ${var.github_owner}/${var.automation_repo}"
+}
+
+data "aws_route53_zone" "existing" {
+  count = var.route53_zone_id == "" ? 0 : 1
+
+  zone_id = var.route53_zone_id
+
+  lifecycle {
+    postcondition {
+      # Catches a zone id pasted from the wrong domain before any record is
+      # written into it.
+      condition     = trimsuffix(self.name, ".") == var.domain_name
+      error_message = "route53_zone_id points at zone '${self.name}', but domain_name is '${var.domain_name}'. Records would be written into the wrong zone."
+    }
+  }
 }
 
 resource "aws_acm_certificate" "site" {
@@ -34,7 +59,7 @@ resource "aws_route53_record" "cert_validation" {
     }
   } : {}
 
-  zone_id         = aws_route53_zone.primary.zone_id
+  zone_id         = local.zone_id
   name            = each.value.name
   type            = each.value.type
   records         = [each.value.record]
@@ -59,7 +84,7 @@ resource "aws_acm_certificate_validation" "site" {
 resource "aws_route53_record" "apex_a" {
   count = var.enable_custom_domain ? 1 : 0
 
-  zone_id = aws_route53_zone.primary.zone_id
+  zone_id = local.zone_id
   name    = var.domain_name
   type    = "A"
 
@@ -73,7 +98,7 @@ resource "aws_route53_record" "apex_a" {
 resource "aws_route53_record" "apex_aaaa" {
   count = var.enable_custom_domain ? 1 : 0
 
-  zone_id = aws_route53_zone.primary.zone_id
+  zone_id = local.zone_id
   name    = var.domain_name
   type    = "AAAA"
 
@@ -87,7 +112,7 @@ resource "aws_route53_record" "apex_aaaa" {
 resource "aws_route53_record" "www_a" {
   count = var.enable_custom_domain ? 1 : 0
 
-  zone_id = aws_route53_zone.primary.zone_id
+  zone_id = local.zone_id
   name    = local.www_domain
   type    = "A"
 
@@ -101,7 +126,7 @@ resource "aws_route53_record" "www_a" {
 resource "aws_route53_record" "www_aaaa" {
   count = var.enable_custom_domain ? 1 : 0
 
-  zone_id = aws_route53_zone.primary.zone_id
+  zone_id = local.zone_id
   name    = local.www_domain
   type    = "AAAA"
 
@@ -112,24 +137,63 @@ resource "aws_route53_record" "www_aaaa" {
   }
 }
 
-# Publish an explicit "no mail from this domain" policy. Cheap, and it stops the
-# domain being an attractive spoofing target.
+# Publishes "this domain sends no mail", which stops it being an easy spoofing
+# target.
+#
+# Opt-in, and default off, because it is destructive to a domain that does send
+# mail: "v=spf1 -all" tells every receiver to reject messages from it, and this
+# would also overwrite an existing apex TXT record such as a domain
+# verification token. Only enable it once you know the zone carries no mail
+# configuration you care about.
 resource "aws_route53_record" "spf_reject" {
-  zone_id = aws_route53_zone.primary.zone_id
+  count = var.manage_email_dns ? 1 : 0
+
+  zone_id = local.zone_id
   name    = var.domain_name
   type    = "TXT"
   ttl     = 3600
   records = ["v=spf1 -all"]
 }
 
-# No rua= address. Aggregate reports would be empty -- the SPF record above
-# declares that this domain sends no mail at all -- and publishing a personal
-# address in a TXT record is a standing invitation to every harvester on the
-# internet. The reject policy is the part that does the work.
+# p=reject covers the domain, sp=reject covers every subdomain, and strict
+# alignment stops a relaxed match being used to sneak past both.
+#
+# No rua= address: aggregate reports would be empty, since the records here
+# declare that the domain neither sends nor receives mail, and publishing a
+# personal address in a TXT record is a standing invitation to every harvester
+# on the internet.
 resource "aws_route53_record" "dmarc" {
-  zone_id = aws_route53_zone.primary.zone_id
+  count = var.manage_email_dns ? 1 : 0
+
+  zone_id = local.zone_id
   name    = "_dmarc.${var.domain_name}"
   type    = "TXT"
   ttl     = 3600
-  records = ["v=DMARC1; p=reject;"]
+  records = ["v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;"]
+}
+
+# RFC 7505 null MX: "this domain accepts no mail". A sending server sees this
+# and gives up immediately rather than queueing and retrying for days, which
+# also stops the domain being used as a bounce-scattering target.
+resource "aws_route53_record" "null_mx" {
+  count = var.manage_email_dns ? 1 : 0
+
+  zone_id = local.zone_id
+  name    = var.domain_name
+  type    = "MX"
+  ttl     = 3600
+  records = ["0 ."]
+}
+
+# A wildcard DKIM record with an empty public key revokes every possible
+# selector. Without it, SPF and DMARC can still be satisfied by a forged
+# message that passes DKIM under some selector nobody is watching.
+resource "aws_route53_record" "dkim_revoke_all" {
+  count = var.manage_email_dns ? 1 : 0
+
+  zone_id = local.zone_id
+  name    = "*._domainkey.${var.domain_name}"
+  type    = "TXT"
+  ttl     = 3600
+  records = ["v=DKIM1; p="]
 }

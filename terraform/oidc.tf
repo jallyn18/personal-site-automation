@@ -89,6 +89,7 @@ data "aws_iam_policy_document" "terraform_iam" {
       "iam:GetRole",
       "iam:UpdateRole",
       "iam:UpdateRoleDescription",
+      "iam:UpdateAssumeRolePolicy",
       "iam:ListRoles",
       "iam:PassRole",
       "iam:TagRole",
