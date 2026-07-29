@@ -18,7 +18,7 @@ crash.*.log
 backend.hcl
 
 # Lambda zips are built from source on every plan.
-terraform/.build/
+terraform/build/
 
 # Python
 __pycache__/

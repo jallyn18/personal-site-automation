@@ -11,7 +11,8 @@ resource "aws_iam_openid_connect_provider" "github" {
   # AWS verifies the provider's certificate against its own trust store for
   # this issuer, so the thumbprint is vestigial -- but the API still requires
   # a syntactically valid one.
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  # This is a public certificate thumbprint, not a credential.
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # pragma: allowlist secret
 }
 
 # --- infrastructure role (personal-site-automation) ---------------------------
@@ -47,6 +48,9 @@ data "aws_iam_policy_document" "terraform_assume_role" {
       values = [
         "repo:${var.github_owner}/${var.automation_repo}:ref:refs/heads/${var.deploy_branch}",
         "repo:${var.github_owner}/${var.automation_repo}:pull_request",
+        # The apply job runs in an environment, which replaces the ref in the
+        # claim rather than adding to it.
+        "repo:${var.github_owner}/${var.automation_repo}:environment:${var.deploy_environment}",
       ]
     }
   }
@@ -155,11 +159,16 @@ data "aws_iam_policy_document" "deploy_assume_role" {
 
     # Only the default branch of the site repo. Pull requests build but do not
     # deploy, so a PR from a fork cannot publish to the bucket.
+    #
+    # The deploy job declares an environment, which replaces the ref in the
+    # subject claim rather than adding to it -- both forms are listed so the
+    # role works whether or not the job is gated by an environment.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:${var.github_owner}/${var.site_repo}:ref:refs/heads/${var.deploy_branch}",
+        "repo:${var.github_owner}/${var.site_repo}:environment:${var.deploy_environment}",
       ]
     }
   }

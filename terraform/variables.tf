@@ -104,6 +104,19 @@ variable "existing_oidc_provider_arn" {
   }
 }
 
+variable "deploy_environment" {
+  description = <<-EOT
+    GitHub Actions environment the deploying jobs run in.
+
+    A job that declares an environment presents an OIDC subject claim of
+    "environment:<name>" instead of "ref:<ref>" -- the ref is replaced, not
+    supplemented -- so the trust policies have to name it explicitly or a job
+    with an environment cannot assume the role even when one without can.
+  EOT
+  type        = string
+  default     = "production"
+}
+
 variable "create_terraform_role" {
   description = <<-EOT
     Create the IAM role GitHub Actions assumes in order to run Terraform.

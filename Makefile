@@ -83,5 +83,16 @@ fmt-check:
 
 .PHONY: clean
 clean: ## Remove build and cache artifacts
-	rm -rf $(TF_DIR)/.build .pytest_cache .mypy_cache .ruff_cache .coverage coverage.xml htmlcov
+	rm -rf $(TF_DIR)/build .pytest_cache .mypy_cache .ruff_cache .coverage coverage.xml htmlcov
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+.PHONY: security
+security: ## Run the scans CI runs
+	checkov --config-file .checkov.yaml
+	pip-audit -r requirements-dev.txt --progress-spinner off
+	git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline
+
+.PHONY: secrets-baseline
+secrets-baseline: ## Regenerate the detect-secrets baseline after auditing findings
+	detect-secrets scan --exclude-files '\.terraform/|terraform/build/|\.git/' \
+		> .secrets.baseline

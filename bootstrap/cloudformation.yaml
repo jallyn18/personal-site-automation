@@ -59,6 +59,16 @@ Parameters:
       to the default branch inside the workflow. Tighten this to refs/heads/main
       once you no longer need branch plans.
 
+  DeployEnvironment:
+    Type: String
+    Default: production
+    Description: >-
+      The GitHub Actions environment the apply job runs in. A job that declares
+      an environment presents a subject claim of "environment:<name>" INSTEAD OF
+      "ref:<ref>" -- the ref disappears from the claim entirely -- so the
+      environment has to be named here or the apply cannot assume the role even
+      though the plan can.
+
   ProjectName:
     Type: String
     Default: personal-site
@@ -186,8 +196,13 @@ Resources:
               # parameter produces a pattern that silently never matches.
               StringLike:
                 token.actions.githubusercontent.com:sub:
+                  # Plan jobs, which declare no environment.
                   - !Sub "repo:${GitHubOwner}/${AutomationRepo}:ref:${AllowedRefPattern}"
                   - !Sub "repo:${GitHubOwner}/${AutomationRepo}:pull_request"
+                  # Apply jobs. An environment replaces the ref in the claim
+                  # rather than adding to it, so this is a separate subject and
+                  # not a narrowing of the ones above.
+                  - !Sub "repo:${GitHubOwner}/${AutomationRepo}:environment:${DeployEnvironment}"
       ManagedPolicyArns:
         # Terraform genuinely needs broad rights to manage what it creates.
         # Hand-maintaining an allowlist for this is a treadmill that ends at "*"

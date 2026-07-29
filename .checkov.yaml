@@ -1,0 +1,80 @@
+# Checkov policy for this project.
+#
+# Everything not listed here fails the build. A scanner whose findings are all
+# waived is worse than no scanner: it produces a green tick that means nothing.
+# So each suppression below names the reason it does not apply, and anything new
+# has to be either fixed or argued for here.
+#
+# Baseline at the time of writing: 244 passed, 48 failed, all 48 covered below.
+
+directory:
+  - terraform
+
+framework:
+  - terraform
+
+compact: true
+quiet: true
+
+# Do not fetch remote guideline metadata; the scan should not depend on a
+# third-party endpoint being reachable from the runner.
+skip-download: true
+
+skip-check:
+  # --- Cost out of proportion to the thing being protected --------------------
+  # Everything in the site bucket is served publicly by CloudFront by design, so
+  # confidentiality controls on the storage layer protect nothing that is not
+  # already being handed to anyone who asks. Integrity and availability are
+  # covered by versioning, IaC and the ability to redeploy from source.
+  - CKV_AWS_144 # S3 cross-region replication
+  - CKV_AWS_145 # KMS-encrypted S3; SSE-S3 with bucket keys is used instead
+  - CKV_AWS_119 # DynamoDB with a customer-managed CMK
+  - CKV_AWS_158 # CloudWatch log groups encrypted with KMS
+  - CKV_AWS_173 # Lambda environment variables encrypted with a CMK
+  - CKV_AWS_26  # SNS topic encryption
+  - CKV2_AWS_34 # SSM parameters as SecureString; these hold a bucket name, a
+  #               distribution id and a public URL
+
+  # --- Controls for a different architecture ----------------------------------
+  - CKV_AWS_117 # Lambda inside a VPC. These functions talk to DynamoDB, Cost
+  #               Explorer and the public internet; a VPC would add NAT charges
+  #               and remove nothing from the attack surface.
+  - CKV_AWS_116 # Lambda dead letter queue. Two of the three are idempotent
+  #               scheduled jobs that simply run again; the third is synchronous.
+  - CKV_AWS_115 # Per-function concurrency limit
+  - CKV_AWS_272 # Lambda code signing
+  - CKV_AWS_50  # X-Ray tracing
+  - CKV_AWS_310 # CloudFront origin failover; there is one origin per behaviour
+  - CKV_AWS_374 # CloudFront geo restriction; a resume should be readable anywhere
+
+  # --- Deliberate operational tradeoffs ---------------------------------------
+  - CKV_AWS_18  # S3 access logging. CloudFront sits in front of both buckets and
+  #               neither is publicly reachable, so the log would record only
+  #               OAC-signed reads.
+  - CKV_AWS_86  # CloudFront access logging. Standard logging v2 needs a log
+  #               delivery pipeline whose cost exceeds the rest of the stack.
+  - CKV_AWS_338 # 1 year log retention; 14 days is deliberate and cheaper
+  - CKV2_AWS_62 # S3 event notifications; nothing consumes them
+  - CKV2_AWS_38 # Route53 DNSSEC
+  - CKV2_AWS_39 # Route53 query logging
+
+  # --- WAF --------------------------------------------------------------------
+  # A WAF in front of a static site with no forms, no login and no writes other
+  # than an idempotent counter costs more per month than everything else here
+  # combined. Revisit if the API ever accepts user input.
+  - CKV_AWS_68  # CloudFront WAF
+  - CKV2_AWS_47 # WAF managed rule for Log4j
+
+  # --- IAM wildcards that AWS itself requires ---------------------------------
+  # Cost Explorer and Budgets have no resource-level permissions; "*" is the only
+  # value their actions accept. The Terraform role's broad rights are bounded by
+  # its OIDC trust policy, which names one repository.
+  - CKV_AWS_109
+  - CKV_AWS_111
+  - CKV_AWS_356
+
+  # --- Resolves itself when the custom domain is switched on ------------------
+  # With cloudfront_default_certificate the minimum TLS version is fixed by AWS
+  # and cannot be set. The ACM path sets TLSv1.2_2021 explicitly, so this passes
+  # as soon as enable_custom_domain is true.
+  - CKV_AWS_174
