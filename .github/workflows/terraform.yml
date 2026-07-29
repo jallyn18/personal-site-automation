@@ -26,8 +26,17 @@ permissions:
 
 env:
   TF_VERSION: "1.13.3"
-  AWS_REGION: us-east-1
   TF_IN_AUTOMATION: "true"
+
+  # Where the infrastructure lives.
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+  # Where Terraform state lives, which is wherever the bootstrap CloudFormation
+  # stack was deployed -- not necessarily the same region, and easy to get wrong
+  # because the console remembers whatever region you last used. S3 answers a
+  # cross-region request with a 301 that the SDK will not follow, so this has to
+  # be exact rather than merely close.
+  TF_STATE_REGION: ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}
 
 # Never let two applies touch the same state at once. Plans are cancellable;
 # an in-flight apply is not.
@@ -89,7 +98,7 @@ jobs:
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="region=${{ env.TF_STATE_REGION }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform
@@ -100,6 +109,7 @@ jobs:
           set +e
           terraform plan -input=false -no-color -lock-timeout=5m \
             -var-file=ci.tfvars \
+            -var="aws_region=${{ env.AWS_REGION }}" \
             -var="domain_name=${{ vars.DOMAIN_NAME }}" \
             -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
             -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \
@@ -158,7 +168,7 @@ jobs:
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="region=${{ env.TF_STATE_REGION }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform

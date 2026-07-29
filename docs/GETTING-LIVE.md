@@ -51,6 +51,22 @@ In **personal-site-automation** → Settings → Secrets and variables → Actio
 | `TF_STATE_BUCKET` | `StateBucket` from the stack outputs |
 | `AWS_OIDC_PROVIDER_ARN` | `OidcProviderArn` from the stack outputs |
 | `DOMAIN_NAME` | `jon-allyn.com` |
+| `TF_STATE_REGION` | the region you deployed the stack in — only needed if it is not `us-east-1` |
+| `AWS_REGION` | the region to deploy the infrastructure into — only needed if it is not `us-east-1` |
+
+**Check which region the CloudFormation stack landed in.** The console remembers
+whichever region you last used, so it is easy to create the stack somewhere you
+did not intend. The state bucket is created in the stack's region, and S3
+answers a cross-region request with a 301 that the AWS SDK will not follow:
+
+```
+Unable to list objects in S3 bucket ... requested bucket from "us-east-1",
+actual location "us-east-2"
+```
+
+Set `TF_STATE_REGION` to the stack's region and it resolves. State does not have
+to live in the same region as the infrastructure — these are two independent
+choices, which is why they are two variables.
 
 **Secrets** tab → New repository secret:
 
