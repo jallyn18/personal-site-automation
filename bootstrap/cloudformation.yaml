@@ -50,11 +50,14 @@ Parameters:
   AllowedRefPattern:
     Type: String
     Default: refs/heads/*
+    AllowedPattern: "^refs/(heads|tags)/.+$"
     Description: >-
-      Which branches may assume the role. The default allows any branch so you
-      can run a plan on a feature branch before merging; the apply job is
-      separately gated to the default branch inside the workflow. Tighten this
-      to refs/heads/main once you no longer need branch plans.
+      Which git refs may assume the role, e.g. refs/heads/* or refs/heads/main.
+      The template supplies the "ref:" prefix that GitHub's subject claim uses,
+      so do not include it here. The default allows any branch so you can run a
+      plan on a feature branch before merging; the apply job is separately gated
+      to the default branch inside the workflow. Tighten this to refs/heads/main
+      once you no longer need branch plans.
 
   ProjectName:
     Type: String
@@ -176,9 +179,14 @@ Resources:
               # Scoped to one repository. A fork cannot mint a token that
               # matches, and the workflow additionally refuses to run the plan
               # job for pull requests originating outside this repository.
+              # GitHub's subject claim for a branch is
+              #   repo:OWNER/REPO:ref:refs/heads/BRANCH
+              # The "ref:" segment is part of the claim, not part of the ref, so
+              # it belongs here rather than in the parameter -- leaving it to the
+              # parameter produces a pattern that silently never matches.
               StringLike:
                 token.actions.githubusercontent.com:sub:
-                  - !Sub "repo:${GitHubOwner}/${AutomationRepo}:${AllowedRefPattern}"
+                  - !Sub "repo:${GitHubOwner}/${AutomationRepo}:ref:${AllowedRefPattern}"
                   - !Sub "repo:${GitHubOwner}/${AutomationRepo}:pull_request"
       ManagedPolicyArns:
         # Terraform genuinely needs broad rights to manage what it creates.

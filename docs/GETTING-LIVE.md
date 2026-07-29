@@ -197,11 +197,25 @@ nothing.
 **`terraform validate` fails in step 3.** Send me the error. That is the one
 thing in this stack never checked against real provider schemas.
 
-**"Could not assume role" in the terraform job.** The trust policy names one
-repository and a branch pattern. Check `AWS_TERRAFORM_ROLE_ARN` is set on the
-right repository, and that the branch you dispatched from matches
-`AllowedRefPattern` on the CloudFormation stack (default `refs/heads/*`, which
-allows any branch).
+**"Not authorized to perform sts:AssumeRoleWithWebIdentity" in the terraform
+job.** The trust policy did not match the token. In order:
+
+1. **Is the bootstrap stack on the current template?** A version of it built the
+   subject pattern without the `ref:` segment GitHub's claim actually uses, so
+   nothing ever matched. Update the stack with the template from this
+   repository — CloudFormation → the stack → Update → Replace existing template
+   → upload → keep the parameters → submit. IAM changes apply immediately; no
+   need to re-run anything else.
+2. **Is `AWS_TERRAFORM_ROLE_ARN` set on the right repository**, as a variable?
+3. **Does the branch match `AllowedRefPattern`?** Default `refs/heads/*` allows
+   any branch. Give the ref without the `ref:` prefix — the template adds it.
+
+To see the claim your run actually presented, add a step before the credentials
+step and read it from the job log:
+
+```yaml
+      - run: echo "${{ github.workflow_ref }} on ${{ github.ref }}"
+```
 
 **"Bucket already exists" from the CloudFormation stack.** Someone has already
 created `personal-site-tfstate-<account-id>`. If that was a previous attempt,
