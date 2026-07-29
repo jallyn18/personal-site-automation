@@ -1,7 +1,7 @@
 # Copy to terraform.tfvars (gitignored) or pass with -var-file.
 
-domain_name = "REPLACE-ME.com"
-alert_email = "you@example.com"
+domain_name = "jon-allyn.com"
+alert_email = "REPLACE-ME@example.com" # receives budget and alarm notifications
 
 # First apply, before your registrar points at Route53: set this to false so ACM
 # validation does not block. Flip to true once `terraform output nameservers`
