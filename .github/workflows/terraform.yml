@@ -145,11 +145,19 @@ jobs:
 
       # The plan file references the exact state it was generated against, so
       # apply replays this artifact rather than re-planning against a moved target.
+      #
+      # The Lambda zips travel with it. archive_file writes them during plan and
+      # the plan records their hashes, but apply runs on a different runner --
+      # rebuilding them there would upload bytes the plan never hashed, and not
+      # shipping them at all means apply cannot find the files it is supposed to
+      # upload.
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/main'
         with:
           name: tfplan
-          path: terraform/tfplan
+          path: |
+            terraform/tfplan
+            terraform/build/
           retention-days: 5
 
   apply:

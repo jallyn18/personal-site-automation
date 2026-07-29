@@ -11,7 +11,8 @@ resource "aws_iam_openid_connect_provider" "github" {
   # AWS verifies the provider's certificate against its own trust store for
   # this issuer, so the thumbprint is vestigial -- but the API still requires
   # a syntactically valid one.
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  # This is a public certificate thumbprint, not a credential.
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # pragma: allowlist secret
 }
 
 # --- infrastructure role (personal-site-automation) ---------------------------

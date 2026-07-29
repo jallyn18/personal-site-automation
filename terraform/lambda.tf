@@ -16,7 +16,7 @@ data "archive_file" "lambda" {
 
   type        = "zip"
   source_dir  = "${path.module}/../lambdas/${each.key}"
-  output_path = "${path.module}/.build/${each.key}.zip"
+  output_path = "${path.module}/build/${each.key}.zip"
 }
 
 # Rotating this salt resets same-day visit dedupe, which is harmless. It exists

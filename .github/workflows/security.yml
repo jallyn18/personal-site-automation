@@ -1,17 +1,27 @@
 name: security
 
+# Scans run as pip-installed CLIs rather than third-party marketplace actions.
+#
+# The previous version pinned aquasecurity/trivy-action at a tag that does not
+# exist, so every job failed before scanning anything -- a red tick that said
+# nothing about the code. Actions also pull an unreviewed dependency into a job
+# that has repository write scope, which is a strange trade for a linter.
+#
+# SARIF upload to the Security tab needs GitHub Advanced Security on private
+# repositories, so results go to the job summary and the exit code instead.
+# Those work everywhere and cannot silently degrade into a green tick.
+
 on:
   pull_request:
   push:
     branches: [main]
   schedule:
-    # Weekly, so newly published rules and CVEs surface without a code change.
+    # Weekly, so newly published advisories surface without a code change.
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
-  security-events: write # required to upload SARIF to the Security tab
 
 concurrency:
   group: security-${{ github.ref }}
@@ -24,21 +34,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Trivy config scan
-        uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/setup-python@v5
         with:
-          scan-type: config
-          scan-ref: terraform
-          format: sarif
-          output: trivy-iac.sarif
-          exit-code: "0" # report, do not block; findings are triaged in the Security tab
-          severity: CRITICAL,HIGH,MEDIUM
+          python-version: "3.12"
 
-      - uses: github/codeql-action/upload-sarif@v3
+      - run: pip install checkov==3.3.8
+
+      # .checkov.yaml lists every suppressed check with the reason it does not
+      # apply. Anything not on that list fails this job.
+      - name: Scan Terraform
+        run: |
+          set -o pipefail
+          checkov --config-file .checkov.yaml --output cli | tee checkov.txt
+
+      - name: Scan the bootstrap CloudFormation
+        run: |
+          set -o pipefail
+          checkov -f bootstrap/cloudformation.yaml --framework cloudformation \
+            --compact --quiet --skip-download --output cli | tee -a checkov.txt
+
+      - name: Summary
         if: always()
-        with:
-          sarif_file: trivy-iac.sarif
-          category: trivy-iac
+        run: |
+          {
+            echo '## Checkov'
+            echo '```'
+            tail -40 checkov.txt 2>/dev/null || echo '(no output)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   dependencies:
     name: Dependency scan
@@ -46,21 +69,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+      - uses: actions/setup-python@v5
         with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy-fs.sarif
-          exit-code: "0"
-          severity: CRITICAL,HIGH
+          python-version: "3.12"
 
-      - uses: github/codeql-action/upload-sarif@v3
+      - run: pip install pip-audit==2.10.1
+
+      # Fails on any known advisory. The Lambda functions ship no dependencies
+      # at all, so this covers the CI toolchain -- which still runs with
+      # repository credentials and is worth keeping current.
+      - name: Audit Python dependencies
+        run: |
+          set -o pipefail
+          pip-audit -r requirements-dev.txt --progress-spinner off | tee audit.txt
+
+      - name: Summary
         if: always()
-        with:
-          sarif_file: trivy-fs.sarif
-          category: trivy-fs
+        run: |
+          {
+            echo '## pip-audit'
+            echo '```'
+            cat audit.txt 2>/dev/null || echo '(no output)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   secrets:
     name: Secret scan
@@ -68,9 +99,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # gitleaks needs history to scan past commits
+          fetch-depth: 0 # scan history, not just the tip
 
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install detect-secrets==1.5.47
+
+      # Compares against the committed baseline: anything already reviewed and
+      # accepted is quiet, anything new fails. Regenerate the baseline with
+      # `make secrets-baseline` after auditing whatever it found.
+      - name: Scan working tree
+        run: |
+          detect-secrets scan --baseline .secrets.baseline \
+            --exclude-files '\.terraform/|terraform/build/|\.git/'
+          git diff --exit-code .secrets.baseline || {
+            echo "::error::detect-secrets found something not in .secrets.baseline. Review it, then regenerate the baseline if it is a false positive."
+            exit 1
+          }
+
+      # A committed secret stays in history after it is deleted from the tip,
+      # so the tip-only scan above is not sufficient on its own.
+      - name: Scan history
+        run: |
+          set -o pipefail
+          git rev-list --all | while read -r sha; do
+            git grep -I --no-color -n -E 'AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' "$sha" -- || true
+          done | tee history.txt
+
+          if [ -s history.txt ]; then
+            echo "::error::Found what looks like a credential in git history."
+            exit 1
+          fi
+          echo "No AWS access keys or private keys in history."
