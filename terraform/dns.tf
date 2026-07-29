@@ -122,10 +122,14 @@ resource "aws_route53_record" "spf_reject" {
   records = ["v=spf1 -all"]
 }
 
+# No rua= address. Aggregate reports would be empty -- the SPF record above
+# declares that this domain sends no mail at all -- and publishing a personal
+# address in a TXT record is a standing invitation to every harvester on the
+# internet. The reject policy is the part that does the work.
 resource "aws_route53_record" "dmarc" {
   zone_id = aws_route53_zone.primary.zone_id
   name    = "_dmarc.${var.domain_name}"
   type    = "TXT"
   ttl     = 3600
-  records = ["v=DMARC1; p=reject; rua=mailto:${var.alert_email}"]
+  records = ["v=DMARC1; p=reject;"]
 }

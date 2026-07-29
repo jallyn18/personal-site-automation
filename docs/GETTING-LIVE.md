@@ -41,7 +41,8 @@ When it finishes, open the **Outputs** tab. You need all three values.
 
 ## 2. Set the repository variables
 
-In **personal-site-automation** → Settings → Secrets and variables → Actions →
+In **personal-site-automation** → Settings → Secrets and variables → Actions.
+
 **Variables** tab → New repository variable:
 
 | Variable | Value |
@@ -50,10 +51,34 @@ In **personal-site-automation** → Settings → Secrets and variables → Actio
 | `TF_STATE_BUCKET` | `StateBucket` from the stack outputs |
 | `AWS_OIDC_PROVIDER_ARN` | `OidcProviderArn` from the stack outputs |
 | `DOMAIN_NAME` | `jon-allyn.com` |
+
+**Secrets** tab → New repository secret:
+
+| Secret | Value |
+| --- | --- |
 | `ALERT_EMAIL` | an address you actually read |
 
-Variables, not secrets. None of these are sensitive — a role ARN grants nothing
-on its own, and the trust policy is what decides who may assume it.
+The four ARNs and names are variables because none of them are credentials. A
+role ARN is an identifier; knowing it grants nothing, because the trust policy
+decides who may assume the role and it demands an OIDC token from this specific
+repository. AWS treats account IDs and role ARNs as non-secret, and they appear
+throughout published documentation and templates.
+
+There is also a practical reason not to make them secrets: GitHub masks secret
+values everywhere they appear in logs. Put the account ID in a secret and every
+Terraform plan turns into `***` soup, precisely when you need to read it.
+
+`ALERT_EMAIL` is the exception. It is not a credential either, but it is
+personal data, and if these repositories are public then so are the Actions
+logs. Masking is the behaviour you want. Terraform plans will show `***` where
+the address appears, which is a small price.
+
+> **If your repositories are public**, the plan output in Actions logs is
+> publicly readable — including your AWS account ID, bucket names, and role
+> ARNs. That is normal and AWS does not treat it as a disclosure, but it is a
+> deliberate choice rather than an accident. Making the automation repository
+> private is the alternative, at the cost of the "read the code" claim the site
+> makes.
 
 Leave `ENABLE_CUSTOM_DOMAIN` unset for now. It defaults to `false`, which is
 what you want until DNS is delegated.

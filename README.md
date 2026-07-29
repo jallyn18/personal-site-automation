@@ -161,8 +161,11 @@ them; this avoids that, so **no long-lived AWS credentials exist at any point.**
 1. **Deploy the bootstrap stack** in the CloudFormation console. Note its three
    outputs.
 2. **Set repository variables** in this repo: `AWS_TERRAFORM_ROLE_ARN`,
-   `TF_STATE_BUCKET`, `AWS_OIDC_PROVIDER_ARN`, `DOMAIN_NAME`, `ALERT_EMAIL`.
-   Variables rather than secrets — a role ARN grants nothing on its own.
+   `TF_STATE_BUCKET`, `AWS_OIDC_PROVIDER_ARN`, `DOMAIN_NAME`. Variables rather
+   than secrets — a role ARN is an identifier, not a credential, and making it
+   a secret would only mask it out of every Terraform plan. `ALERT_EMAIL` is
+   the exception and goes in as a **secret**: it is personal data, and Actions
+   logs are public when the repository is.
 3. **Run the terraform workflow on a branch.** It validates and plans without
    applying, so you can read the plan before anything changes.
 4. **Merge to `main`.** Plan runs again and applies.

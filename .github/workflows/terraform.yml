@@ -101,7 +101,7 @@ jobs:
           terraform plan -input=false -no-color -lock-timeout=5m \
             -var-file=ci.tfvars \
             -var="domain_name=${{ vars.DOMAIN_NAME }}" \
-            -var="alert_email=${{ vars.ALERT_EMAIL }}" \
+            -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
             -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \
             -var="enable_custom_domain=${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}" \
             -out=tfplan
