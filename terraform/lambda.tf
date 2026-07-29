@@ -197,6 +197,10 @@ resource "aws_lambda_function" "cost" {
     variables = {
       TABLE_NAME = aws_dynamodb_table.metrics.name
       LOG_LEVEL  = "INFO"
+
+      # Empty means no filter, which reports whole-account spend.
+      COST_TAG_KEY   = try(var.cost_filter_tag.key, "")
+      COST_TAG_VALUE = try(var.cost_filter_tag.value, "")
     }
   }
 

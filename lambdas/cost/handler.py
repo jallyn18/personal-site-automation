@@ -33,6 +33,11 @@ COST_TAG_VALUE = os.environ.get("COST_TAG_VALUE", "")
 
 TOP_SERVICES = int(os.environ.get("TOP_SERVICES", "8"))
 
+# How long dated snapshots are kept. Cost Explorer can be re-queried for history
+# later, but only at $0.01 per call -- keeping the answers we have already paid
+# for is free. ~13 months so a year-over-year comparison stays possible.
+HISTORY_TTL_DAYS = int(os.environ.get("HISTORY_TTL_DAYS", "400"))
+
 _table = None
 _ce = None
 
@@ -171,7 +176,19 @@ def handler(event: dict, context: Any) -> dict:  # noqa: ARG001 - Lambda signatu
         "collected_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
     }
 
-    _get_table().put_item(Item=item)
+    table = _get_table()
+    table.put_item(Item=item)
+
+    # A dated copy alongside the current one. Nothing reads this yet; it exists
+    # because a trend line cannot be backfilled from data nobody collected, and
+    # the marginal cost of writing it is a fraction of a cent a month.
+    table.put_item(
+        Item={
+            **item,
+            "sk": f"DAY#{today.isoformat()}",
+            "expires_at": int(datetime.now(UTC).timestamp()) + HISTORY_TTL_DAYS * 86400,
+        }
+    )
 
     LOG.info(
         "collected cost: %s %s MTD across %d services",

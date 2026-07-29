@@ -150,6 +150,28 @@ variable "uptime_check_rate_minutes" {
   }
 }
 
+variable "cost_filter_tag" {
+  description = <<-EOT
+    Restrict the cost figures published on the site to resources carrying this
+    cost-allocation tag, as { key = "...", value = "..." }.
+
+    Leave null to report whole-account spend. That is the right answer when the
+    account hosts nothing but this site, and the wrong one when it does not --
+    the figure is published publicly, so an account with other workloads in it
+    would be advertising their combined bill.
+
+    Every resource in this stack is already tagged Project = <project>, so
+    { key = "Project", value = "personal-site" } scopes it correctly. The tag
+    must first be activated under Billing -> Cost allocation tags, and takes up
+    to 24 hours to appear in Cost Explorer after activation.
+  EOT
+  type = object({
+    key   = string
+    value = string
+  })
+  default = null
+}
+
 variable "log_retention_days" {
   description = "CloudWatch Logs retention for the Lambda functions."
   type        = number

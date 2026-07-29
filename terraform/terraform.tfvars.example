@@ -15,3 +15,15 @@ automation_repo = "personal-site-automation"
 
 monthly_budget_usd        = 10
 uptime_check_rate_minutes = 5
+
+# The cost figures on the site cover the whole account by default. If this
+# account holds anything besides the site, scope them -- the number is published
+# publicly, and everything in this stack is already tagged Project.
+#
+# Activate the tag first under Billing -> Cost allocation tags. It takes up to
+# 24 hours to appear in Cost Explorer afterwards.
+#
+# cost_filter_tag = {
+#   key   = "Project"
+#   value = "personal-site"
+# }

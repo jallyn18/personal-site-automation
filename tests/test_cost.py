@@ -168,3 +168,25 @@ class TestHandler:
 
         assert len(ce.usage_calls) == 1
         assert len(ce.forecast_calls) == 1
+
+    def test_keeps_a_dated_snapshot_alongside_the_current_one(self, cost, ce, table):
+        ce.groups = [group("Amazon Route 53", "0.50")]
+
+        cost.handler({}, None)
+
+        dated = [i for i in table.scan()["Items"] if i["sk"].startswith("DAY#")]
+
+        assert len(dated) == 1
+        assert dated[0]["month_to_date"] == Decimal("0.50")
+        # Without a TTL these would accumulate forever.
+        assert dated[0]["expires_at"] > 0
+
+    def test_rerunning_on_the_same_day_overwrites_rather_than_duplicates(self, cost, ce, table):
+        ce.groups = [group("Amazon Route 53", "0.50")]
+
+        cost.handler({}, None)
+        cost.handler({}, None)
+
+        dated = [i for i in table.scan()["Items"] if i["sk"].startswith("DAY#")]
+
+        assert len(dated) == 1
