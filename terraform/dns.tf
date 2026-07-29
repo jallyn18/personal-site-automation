@@ -47,12 +47,21 @@ resource "aws_acm_certificate" "site" {
   }
 }
 
-# One validation record per distinct name on the certificate. ACM emits
-# identical CNAMEs for names in the same zone, so the map dedupes on record name.
+# One validation record per distinct name on the certificate.
+#
+# Keyed on domain_name, which ACM fills in from the configuration and is
+# therefore known at plan time. The obvious key -- resource_record_name -- is
+# not: on a first apply the certificate does not exist yet, so every validation
+# field is "known after apply", and for_each refuses a map whose *keys* are
+# unknown because it cannot tell how many instances it is planning.
+#
+# trimprefix collapses a wildcard SAN onto its parent domain. ACM validates
+# "*.example.com" and "example.com" with one shared record, and two resources
+# writing the same name would otherwise fight over it.
 resource "aws_route53_record" "cert_validation" {
   for_each = var.enable_custom_domain ? {
     for dvo in aws_acm_certificate.site[0].domain_validation_options :
-    dvo.resource_record_name => {
+    trimprefix(dvo.domain_name, "*.") => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
