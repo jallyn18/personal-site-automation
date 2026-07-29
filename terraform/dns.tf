@@ -155,10 +155,13 @@ resource "aws_route53_record" "spf_reject" {
   records = ["v=spf1 -all"]
 }
 
-# No rua= address. Aggregate reports would be empty -- the SPF record above
-# declares that this domain sends no mail at all -- and publishing a personal
-# address in a TXT record is a standing invitation to every harvester on the
-# internet. The reject policy is the part that does the work.
+# p=reject covers the domain, sp=reject covers every subdomain, and strict
+# alignment stops a relaxed match being used to sneak past both.
+#
+# No rua= address: aggregate reports would be empty, since the records here
+# declare that the domain neither sends nor receives mail, and publishing a
+# personal address in a TXT record is a standing invitation to every harvester
+# on the internet.
 resource "aws_route53_record" "dmarc" {
   count = var.manage_email_dns ? 1 : 0
 
@@ -166,5 +169,31 @@ resource "aws_route53_record" "dmarc" {
   name    = "_dmarc.${var.domain_name}"
   type    = "TXT"
   ttl     = 3600
-  records = ["v=DMARC1; p=reject;"]
+  records = ["v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;"]
+}
+
+# RFC 7505 null MX: "this domain accepts no mail". A sending server sees this
+# and gives up immediately rather than queueing and retrying for days, which
+# also stops the domain being used as a bounce-scattering target.
+resource "aws_route53_record" "null_mx" {
+  count = var.manage_email_dns ? 1 : 0
+
+  zone_id = local.zone_id
+  name    = var.domain_name
+  type    = "MX"
+  ttl     = 3600
+  records = ["0 ."]
+}
+
+# A wildcard DKIM record with an empty public key revokes every possible
+# selector. Without it, SPF and DMARC can still be satisfied by a forged
+# message that passes DKIM under some selector nobody is watching.
+resource "aws_route53_record" "dkim_revoke_all" {
+  count = var.manage_email_dns ? 1 : 0
+
+  zone_id = local.zone_id
+  name    = "*._domainkey.${var.domain_name}"
+  type    = "TXT"
+  ttl     = 3600
+  records = ["v=DKIM1; p="]
 }

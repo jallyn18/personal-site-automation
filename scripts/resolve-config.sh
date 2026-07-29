@@ -63,7 +63,10 @@ echo "state bucket  : ${bucket}"
 echo "state region  : ${location} (discovered from the bucket)"
 echo "deploy region : ${deploy_region}"
 echo "domain        : ${DOMAIN_NAME:-<unset>}"
-echo "custom domain : ${ENABLE_CUSTOM_DOMAIN:-false}"
+# enable_custom_domain, route53_zone_id and manage_email_dns live in
+# terraform/ci.tfvars, not in repository variables, so they are not echoed
+# here -- printing a value this script does not actually control would be
+# worse than printing nothing.
 echo "oidc provider : ${oidc}"
 echo "caller identity:"
 aws sts get-caller-identity
