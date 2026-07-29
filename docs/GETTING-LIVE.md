@@ -51,22 +51,22 @@ In **personal-site-automation** → Settings → Secrets and variables → Actio
 | `TF_STATE_BUCKET` | `StateBucket` from the stack outputs |
 | `AWS_OIDC_PROVIDER_ARN` | `OidcProviderArn` from the stack outputs |
 | `DOMAIN_NAME` | `jon-allyn.com` |
-| `TF_STATE_REGION` | the region you deployed the stack in — only needed if it is not `us-east-1` |
-| `AWS_REGION` | the region to deploy the infrastructure into — only needed if it is not `us-east-1` |
+| `AWS_REGION` | *optional* — where to create the infrastructure. Defaults to `us-east-1`. |
 
-**Check which region the CloudFormation stack landed in.** The console remembers
-whichever region you last used, so it is easy to create the stack somewhere you
-did not intend. The state bucket is created in the stack's region, and S3
-answers a cross-region request with a 301 that the AWS SDK will not follow:
+**The stack outputs two ARNs and they are easy to swap.** `AWS_TERRAFORM_ROLE_ARN`
+wants the one containing `:role/`; `AWS_OIDC_PROVIDER_ARN` wants the one
+containing `:oidc-provider/`. The workflow checks this before doing anything
+else and names the mistake if you get it wrong.
 
-```
-Unable to list objects in S3 bucket ... requested bucket from "us-east-1",
-actual location "us-east-2"
-```
+**You do not need to tell it where the state bucket is.** The workflow calls
+`s3api get-bucket-location` and uses the answer. The bucket lives in whichever
+region you deployed the CloudFormation stack to — the console remembers the last
+region you used, so this is easy to get wrong, and getting it wrong produces an
+S3 301 that the AWS SDK refuses to follow and that names no variable. Not asking
+is better than asking and being lied to.
 
-Set `TF_STATE_REGION` to the stack's region and it resolves. State does not have
-to live in the same region as the infrastructure — these are two independent
-choices, which is why they are two variables.
+State does not have to live in the same region as the infrastructure; these are
+independent, and only the infrastructure region is a variable.
 
 **Secrets** tab → New repository secret:
 

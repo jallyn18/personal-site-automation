@@ -92,26 +92,22 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # Prints what the expressions above actually resolved to. An unset or
-      # wrongly-scoped repository variable is otherwise invisible until it
-      # surfaces as a confusing error several steps later.
-      - name: Show resolved configuration
-        run: |
-          echo "state bucket   : ${{ vars.TF_STATE_BUCKET }}"
-          echo "state region   : ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}"
-          echo "deploy region  : ${{ vars.AWS_REGION || 'us-east-1' }}"
-          echo "domain         : ${{ vars.DOMAIN_NAME }}"
-          echo "custom domain  : ${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}"
-          echo "oidc provider  : ${{ vars.AWS_OIDC_PROVIDER_ARN }}"
-          echo "caller identity:"
-          aws sts get-caller-identity
+      - name: Resolve configuration
+        id: config
+        run: ./scripts/resolve-config.sh
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          AWS_OIDC_PROVIDER_ARN: ${{ vars.AWS_OIDC_PROVIDER_ARN }}
+          DEPLOY_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+          ENABLE_CUSTOM_DOMAIN: ${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}
 
       - name: terraform init
         run: |
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}" \
+            -backend-config="region=${{ steps.config.outputs.state_region }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform
@@ -176,12 +172,22 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Resolve configuration
+        id: config
+        run: ./scripts/resolve-config.sh
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          AWS_OIDC_PROVIDER_ARN: ${{ vars.AWS_OIDC_PROVIDER_ARN }}
+          DEPLOY_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+          ENABLE_CUSTOM_DOMAIN: ${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}
+
       - name: terraform init
         run: |
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}" \
+            -backend-config="region=${{ steps.config.outputs.state_region }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform

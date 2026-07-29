@@ -40,12 +40,22 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Resolve configuration
+        id: config
+        run: ./scripts/resolve-config.sh
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          AWS_OIDC_PROVIDER_ARN: ${{ vars.AWS_OIDC_PROVIDER_ARN }}
+          DEPLOY_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+          ENABLE_CUSTOM_DOMAIN: ${{ vars.ENABLE_CUSTOM_DOMAIN || 'false' }}
+
       - name: terraform init
         run: |
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
-            -backend-config="region=${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}" \
+            -backend-config="region=${{ steps.config.outputs.state_region }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
         working-directory: terraform
