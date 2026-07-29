@@ -105,17 +105,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install detect-secrets==1.5.47
+      - run: pip install detect-secrets==1.5.0
 
-      # Compares against the committed baseline: anything already reviewed and
-      # accepted is quiet, anything new fails. Regenerate the baseline with
-      # `make secrets-baseline` after auditing whatever it found.
+      # detect-secrets-hook, not `detect-secrets scan --baseline`. The latter
+      # rewrites the baseline as a side effect, so any check that compares the
+      # file against the committed one reports a difference on every run whether
+      # or not it found anything. The hook only reads it, and exits non-zero on
+      # a secret that is not already recorded.
+      #
+      # Regenerate the baseline with `make secrets-baseline` after auditing
+      # whatever it found.
       - name: Scan working tree
         run: |
-          detect-secrets scan --baseline .secrets.baseline \
-            --exclude-files '\.terraform/|terraform/build/|\.git/'
-          git diff --exit-code .secrets.baseline || {
-            echo "::error::detect-secrets found something not in .secrets.baseline. Review it, then regenerate the baseline if it is a false positive."
+          set -o pipefail
+          git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline || {
+            echo "::error::detect-secrets found something not in .secrets.baseline. Review it; if it is a false positive, regenerate the baseline with 'make secrets-baseline'."
             exit 1
           }
 

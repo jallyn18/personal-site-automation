@@ -90,8 +90,7 @@ clean: ## Remove build and cache artifacts
 security: ## Run the scans CI runs
 	checkov --config-file .checkov.yaml
 	pip-audit -r requirements-dev.txt --progress-spinner off
-	detect-secrets scan --baseline .secrets.baseline \
-		--exclude-files '\.terraform/|terraform/build/|\.git/'
+	git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline
 
 .PHONY: secrets-baseline
 secrets-baseline: ## Regenerate the detect-secrets baseline after auditing findings
