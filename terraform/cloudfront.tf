@@ -58,31 +58,6 @@ resource "aws_cloudfront_function" "rewrite_index" {
   JS
 }
 
-# Being removed, in two steps. Nothing references it any more -- the
-# association on /api/* is already gone -- but CloudFront refuses to delete a
-# function while a distribution still lists it, and dropping the association
-# and deleting the function in one apply does not sequence the way it needs to:
-#
-#   Error: deleting CloudFront Function (personal-site-api-edge-probe):
-#   FunctionInUse: Cannot delete function ..., it is in use by 1 distributions
-#
-# Terraform went straight to the destroy rather than updating the distribution
-# first, so the delete raced the detach and lost. Keeping the declaration here
-# lets this apply carry the detach on its own. The resource goes in the next
-# one, once the distribution has deployed without it.
-resource "aws_cloudfront_function" "api_edge_probe" {
-  name    = "${local.name}-api-edge-probe"
-  runtime = "cloudfront-js-2.0"
-  comment = "Being deleted; detached from /api/* first"
-  publish = true
-
-  code = <<-JS
-    function handler(event) {
-      return event.request;
-    }
-  JS
-}
-
 resource "aws_cloudfront_response_headers_policy" "security" {
   name    = "${local.name}-security-headers"
   comment = "HSTS, CSP and friends for the static site"
