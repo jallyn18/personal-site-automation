@@ -363,6 +363,44 @@ def main() -> int:
         if total <= 2:
             print("    => only this job's probes. CloudFront has never invoked it.")
 
+    # Zero invocations still has two readings: CloudFront sends a signed
+    # request that the Function URL rejects (an auth rejection never invokes
+    # the function, so it would not show above), or CloudFront never routes to
+    # the lambda origin at all. The function URL publishes its own request
+    # counters, which separate them: a rejected request is still a request.
+    print("\n== metrics actually published for this function")
+    listed = aws(
+        "cloudwatch", "list-metrics",
+        "--namespace", "AWS/Lambda",
+        "--dimensions", f"Name=FunctionName,Value={fn}",
+        "--region", REGION,
+    )
+    url_metrics = []
+    if listed:
+        names = sorted({m.get("MetricName", "") for m in listed.get("Metrics", []) or []})
+        show("metric names", names)
+        url_metrics = [n for n in names if n.startswith("Url")]
+
+    print("\n== function URL request counters, last 24h")
+    if not url_metrics:
+        print("    no Url* metrics published at all.")
+        print("    => nothing has ever reached the function URL, from any caller.")
+    for metric in url_metrics:
+        stats = aws(
+            "cloudwatch", "get-metric-statistics",
+            "--namespace", "AWS/Lambda",
+            "--metric-name", metric,
+            "--dimensions", f"Name=FunctionName,Value={fn}",
+            "--start-time", _iso(hours_ago=24),
+            "--end-time", _iso(hours_ago=0),
+            "--period", "3600",
+            "--statistics", "Sum",
+            "--region", REGION,
+        )
+        if stats is not None:
+            total = sum(p.get("Sum", 0) for p in stats.get("Datapoints", []) or [])
+            show(f"{metric} total", total)
+
     print("\n== done")
     return 0
 
