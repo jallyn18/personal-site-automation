@@ -150,7 +150,12 @@ def main() -> int:
             show("originProtocolPolicy", custom.get("OriginProtocolPolicy"))
 
     # --- cache behaviours -------------------------------------------------
+    # Quantity, not just Items. CloudFront honours Quantity: a behaviour that
+    # is present in Items while Quantity is 0 is carried in the config and
+    # ignored at the edge, which would look exactly like this bug.
     print("\n== cache behaviours (in match order)")
+    show("CacheBehaviors.Quantity", dc.get("CacheBehaviors", {}).get("Quantity"))
+    show("raw CacheBehaviors", json.dumps(dc.get("CacheBehaviors", {}), default=str))
     behaviours = dc.get("CacheBehaviors", {}).get("Items", []) or []
     if not behaviours:
         print("  ! NO ordered cache behaviours -- /api/* would fall through to default")
