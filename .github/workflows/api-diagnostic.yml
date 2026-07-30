@@ -44,7 +44,12 @@ jobs:
       # Output goes to the log, never to $GITHUB_STEP_SUMMARY: ::add-mask::
       # does not filter summaries, and this repository is public. The script
       # redacts the account id and the function URL subdomain itself.
+      - name: Install signing dependencies
+        run: pip install --quiet boto3
+
       - name: Diagnose
         env:
           AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          # Public in ci.tfvars; needed to check what the zone actually points at.
+          ROUTE53_ZONE_ID: Z03449763V0AE74DQS39J
         run: python3 .github/scripts/api-diagnostic.py

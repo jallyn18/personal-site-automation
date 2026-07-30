@@ -88,10 +88,44 @@ def main() -> int:
     dc = config["DistributionConfig"]
 
     show("enabled", dc.get("Enabled"))
+    show("aliases", dc.get("Aliases", {}).get("Items") or "(none)")
 
+    dist_domain = None
     dist = aws("cloudfront", "get-distribution", "--id", dist_id)
     if dist:
         show("status", dist["Distribution"].get("Status"))
+        dist_domain = dist["Distribution"].get("DomainName")
+        show("domainName", dist_domain)
+
+    # Is this actually the distribution the domain resolves to? A second,
+    # orphaned distribution owning the alias would explain everything while
+    # leaving the Terraform-managed one looking perfect.
+    print("\n== every distribution in the account")
+    all_dists = aws("cloudfront", "list-distributions")
+    if all_dists:
+        for item in all_dists.get("DistributionList", {}).get("Items", []) or []:
+            marker = "  <- the one in SSM" if item.get("Id") == dist_id else ""
+            print(f"  - id={item.get('Id')}{marker}")
+            show("aliases", item.get("Aliases", {}).get("Items") or "(none)")
+            show("status/enabled", f"{item.get('Status')}/{item.get('Enabled')}")
+
+    # And what does the zone actually point at?
+    print("\n== route53 alias target")
+    zone = os.environ.get("ROUTE53_ZONE_ID", "")
+    if zone:
+        records = aws(
+            "route53", "list-resource-record-sets", "--hosted-zone-id", zone,
+            "--max-items", "40",
+        )
+        if records:
+            for rr in records.get("ResourceRecordSets", []) or []:
+                if rr.get("Type") not in ("A", "AAAA"):
+                    continue
+                target = (rr.get("AliasTarget") or {}).get("DNSName", "")
+                print(f"  - {rr.get('Name')} {rr.get('Type')} -> {scrub(target)}")
+                if dist_domain and target:
+                    matches = target.rstrip(".").lower() == dist_domain.rstrip(".").lower()
+                    show("points at the SSM distribution", matches)
 
     # --- origins ---------------------------------------------------------
     print("\n== origins")
@@ -211,6 +245,69 @@ def main() -> int:
         if events:
             for e in events.get("events", []) or []:
                 print(f"    | {scrub(e.get('message', '').rstrip())}")
+
+    # --- is the handler itself healthy? -----------------------------------
+    # Invoking the function directly bypasses the Function URL and its auth,
+    # so this separates "the handler is broken" from "nothing can reach it".
+    print("\n== direct handler invoke (bypasses the function URL)")
+    event = json.dumps({
+        "rawPath": "/api/health",
+        "requestContext": {"http": {"method": "GET", "path": "/api/health"}},
+        "headers": {},
+    })
+    proc = subprocess.run(
+        ["aws", "lambda", "invoke",
+         "--function-name", fn,
+         "--payload", event,
+         "--cli-binary-format", "raw-in-base64-out",
+         "--region", REGION,
+         "/tmp/handler-out.json"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        print(f"    ! invoke failed: {scrub(proc.stderr.strip())}")
+    else:
+        try:
+            with open("/tmp/handler-out.json") as fh:
+                print(f"    response: {scrub(fh.read().strip())[:400]}")
+        except OSError as exc:
+            print(f"    ! could not read response: {exc}")
+
+    # --- does the function URL accept a correctly signed caller? -----------
+    # If a SigV4 request from this role succeeds, the URL and its auth layer
+    # work, and the problem is specific to CloudFront's signed requests.
+    print("\n== signed request straight to the function URL")
+    if url_config:
+        try:
+            import boto3
+            import urllib.request
+            from botocore.auth import SigV4Auth
+            from botocore.awsrequest import AWSRequest
+
+            url = url_config["FunctionUrl"].rstrip("/") + "/api/health"
+            creds = boto3.Session().get_credentials().get_frozen_credentials()
+            req = AWSRequest(method="GET", url=url)
+            SigV4Auth(creds, "lambda", REGION).add_auth(req)
+            signed = urllib.request.Request(
+                url, headers=dict(req.headers), method="GET"
+            )
+            with urllib.request.urlopen(signed, timeout=20) as resp:  # noqa: S310
+                show("status", resp.status)
+                show("body", resp.read().decode()[:200])
+        except Exception as exc:  # noqa: BLE001 - any failure is the datum
+            show("failed", f"{type(exc).__name__}: {exc}")
+
+    # --- did either probe produce a log stream? ---------------------------
+    print("\n== invocation history again (after the probes)")
+    streams = aws(
+        "logs", "describe-log-streams",
+        "--log-group-name", log_group,
+        "--order-by", "LastEventTime", "--descending",
+        "--max-items", "5",
+        "--region", REGION,
+    )
+    if streams is not None:
+        show("log streams", len(streams.get("logStreams", []) or []))
 
     print("\n== done")
     return 0
