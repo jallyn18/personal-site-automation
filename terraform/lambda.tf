@@ -231,18 +231,21 @@ resource "aws_lambda_permission" "cloudfront_invoke_api" {
 # only ever had the first.
 #
 # That reads like belt and braces -- InvokeFunctionUrl is the action documented
-# for function URLs, and plenty of published examples grant only it -- but the
-# edge probe removed the alternatives. CloudFront does apply the /api/* cache
-# behaviour: /api/__edge-probe returns 200 from the edge with
-# x-cache: FunctionGeneratedResponse. The behaviour targets this origin, the OAC
-# is lambda/always/sigv4 and attached to it, the function URL is AWS_IAM and its
-# host matches the origin exactly, and a correctly signed request to that URL
-# returns 200. Requests through CloudFront still come back as the 404 page,
-# which is what the distribution turns an origin 403 into.
+# for function URLs, and plenty of published examples grant only it -- so it was
+# passed over twice while /api/* returned nothing but the site's 404 page. It
+# was the whole problem. Adding it turned every endpoint from 404 to 200 with no
+# other change.
 #
-# Every hop is accounted for except this one difference from the documented
-# setup, so close it. Additive and scoped to the same distribution: it grants
-# nothing that the statement above does not already imply.
+# Granting only InvokeFunctionUrl fails in a way that is almost impossible to
+# read from outside. Every individual piece checks out: the cache behaviour is
+# applied at the edge, it targets this origin, the OAC is lambda/always/sigv4
+# and attached to it, the function URL is AWS_IAM with a matching host, and a
+# correctly signed request to that URL returns 200. CloudFront is simply refused,
+# and the distribution turns the resulting origin 403 into /404.html, so the
+# symptom is a missing page rather than a permissions error.
+#
+# Follow AWS's instructions exactly here. The apparently redundant second call
+# is the one that matters.
 #
 # No function_url_auth_type here, unlike the statement above. AddPermission
 # rejects the pair outright -- "FunctionUrlAuthType is only supported for

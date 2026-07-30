@@ -92,6 +92,23 @@ expensive to rediscover.
 - **Verify tool and action versions against the real index**, not from memory or a
   local environment. Two separate failures came from pinning versions that do not
   exist (`aquasecurity/trivy-action@0.28.0`, `detect-secrets==1.5.47`).
+- **CloudFront OAC to a Lambda function URL needs *two* permissions.**
+  `lambda:InvokeFunctionUrl` alone is not enough, despite being the action
+  documented for function URLs and the only one most published examples grant.
+  AWS's own OAC instructions issue a second `add-permission` for
+  `lambda:InvokeFunction`, and without it CloudFront is refused while every
+  individual piece still checks out — behaviour applied at the edge, OAC
+  attached, `AWS_IAM` set, a correctly signed request returning 200. The
+  distribution turns the resulting origin 403 into `/404.html`, so it presents
+  as "`/api/*` 404s", not as a permissions problem. Note the second statement
+  takes no `function_url_auth_type`; `AddPermission` rejects that pair, and only
+  at apply time.
+- **`custom_error_response` is distribution-wide, not per-behaviour.** The
+  `403 -> /404.html` mapping that gives the static site its 404 page also
+  rewrites anything the API returns as 403 or 404 into an HTML page. That is
+  what made the above take a full session to find: every failure mode on
+  `/api/*` produces one byte-identical reply. When debugging that path, do not
+  trust the status code — reach past CloudFront.
 - **S3 `get-bucket-location` returns `None` for `us-east-1`.** Handle it.
 - **`::add-mask::` filters logs, not step summaries**, and it applies only to the
   job that registers it. `resolve-config.sh` masks the account id for that
