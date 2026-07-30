@@ -5,9 +5,9 @@ lives in `jallyn18/personal-site-gatsby`.
 
 Read [`specs/001-personal-site/spec.md`](./specs/001-personal-site/spec.md) for
 what this system is required to do and [`plan.md`](./specs/001-personal-site/plan.md)
-for why it is built this way. Both are retroactive; §7 of the plan is the record of
-what already went wrong here, and is worth reading before changing anything in the
-pipeline.
+for why it is built this way. Both are retroactive: they describe the system as
+built rather than having driven it, and they are the baseline the next change
+should be specified against.
 
 ---
 
@@ -69,7 +69,8 @@ specs/001-personal-site/         spec.md, plan.md
 
 ## Gotchas that have already cost time
 
-Each of these was a real failure. Details in plan §7.
+Each of these has already broken a run here. They are cheap to avoid and
+expensive to rediscover.
 
 - **`-var` beats `-var-file`.** A variable set in both places silently takes the
   workflow's value. Anything in `ci.tfvars` must **not** also be passed as `-var`.
@@ -102,7 +103,7 @@ Each of these was a real failure. Details in plan §7.
 
 **Branch and PR.** Develop on a feature branch, open a PR, let the plan run.
 **Do not merge while the plan check is red** — that already happened once and put a
-configuration on `main` that could not plan (plan §7.9).
+configuration on `main` that could not plan.
 
 **Local checks before pushing:**
 
@@ -127,7 +128,8 @@ this file is not actually enforced.
 
 **Default branch:** `main`.
 
-**Required status checks on `main`** — these are what stop plan §7.9 recurring:
+**Required status checks on `main`** — these are what stop a red plan reaching
+`main`:
 
 | Check | From |
 | --- | --- |
