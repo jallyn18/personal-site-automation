@@ -8,10 +8,9 @@
 | **Delivered** | `03c0fcd` … `9ae6813` (automation), `66b3b2a` … `b518dbb` (site) |
 
 > **This plan is retroactive.** It records the architecture that was built and the
-> reasoning behind it, reconstructed on the day the system went live. §7 is the
-> part a forward-written plan would not contain: what actually went wrong, and what
-> each failure taught. That section is the most useful thing in this document and
-> the least flattering, which is why it is here.
+> reasoning behind it, reconstructed on the day the system went live. It did not
+> drive the original build and does not pretend to; it exists so the next change
+> has something to be specified against.
 
 ---
 
@@ -197,7 +196,9 @@ inspectable and updatable later — which it was, four times.
 `use_lockfile = true` — S3 conditional writes. The DynamoDB locking table is
 deprecated and there is no reason to provision one. The backend region is
 **discovered** at run time via `aws s3api get-bucket-location` rather than
-configured, for reasons in §7.2.
+configured. A configured region can disagree with the bucket, and S3 answers a
+cross-region request with a 301 the SDK will not follow -- an error that names no
+variable. Discovering it removes the class of mistake rather than documenting it.
 
 ### 4.8 Broad IAM for Terraform, narrow trust policy
 
@@ -254,110 +255,14 @@ for hermetic runs, and its 26 suppressions each carry a written reason.
    markers (FR-4).
 2. **Terraform + Lambdas + workflows** written in full. `03c0fcd`.
 3. **Bootstrap stack** deployed by hand. `3cdf060`.
-4. **Debug the pipeline into working order.** Six distinct failures — §7.
+4. **Debug the pipeline into working order.** The constraint in §3 means every
+   fix costs a full pipeline round trip.
 5. **First apply.** 55 resources. Site deployed and verified serving `b518dbb` on
    the first attempt.
 6. **Adopt the real hosted zone, lock out email, enable the custom domain.**
    `ad5ed80` … `9ae6813`. Live on `jon-allyn.com`.
 
-## 7. What went wrong
-
-The part a forward-written plan cannot contain.
-
-### 7.1 The OIDC subject claim was wrong, and `cfn-lint` passed it
-
-The bootstrap template produced `repo:O/R:refs/heads/*`. The real claim is
-`repo:O/R:ref:refs/heads/*` — a literal `ref:` segment. The template was
-schema-valid and semantically wrong, so linting had nothing to say. **A validator
-that checks shape cannot check meaning.**
-
-### 7.2 State bucket region hardcoded; then "fixed" with something that silently returned empty
-
-The backend region was pinned to `us-east-1`; the bucket was in `us-east-2`. S3
-answers a cross-region request with a 301 the SDK will not follow, and the error
-names no variable.
-
-The first fix hoisted the region into a workflow-level `env:` block reading from
-`vars` — a context with restricted access there, which yields empty rather than
-erroring. **The failure mode of an expression that resolves to nothing is worse
-than the bug it replaced.** The final fix removed the variable entirely and
-discovers the region with `aws s3api get-bucket-location`, handling the historical
-`None` that means `us-east-1`.
-
-### 7.3 "Re-run" replays the workflow file from the original commit
-
-Several rounds of fixes appeared to change nothing. The runs showed
-`run_attempt: 3` against a stale `head_sha`: re-running replays the *original*
-commit's workflow. The fixes had never executed. Found by querying the API for run
-metadata rather than reading the logs again.
-
-### 7.4 A repository variable held the wrong ARN
-
-`AWS_OIDC_PROVIDER_ARN` had been set to the role ARN. It surfaced minutes later as
-an unrelated IAM error. `scripts/resolve-config.sh` now validates the shape and
-distinguishes `:role/` from `:oidc-provider/` with a message naming the variable
-the value actually belongs in.
-
-**This is the pattern behind §7.1 through §7.4:** every one presented as a failure
-somewhere other than its cause. The response was to add validation that fails on
-the *actual problem* — which is what `resolve-config.sh` is for.
-
-### 7.5 The security scans were decorative
-
-`aquasecurity/trivy-action@0.28.0` does not exist, so all three jobs failed before
-scanning anything — and the original config had `exit-code: "0"`, meaning it would
-have reported nothing even had it run. Then `detect-secrets==1.5.47` did not exist
-either; that version had been read off a sandbox instead of the real index. Then
-`detect-secrets scan --baseline` turned out to *mutate* the baseline, so the
-`git diff --exit-code` assertion built on it could never pass — it would have
-failed forever and looked like a genuine finding.
-
-Fixed to `detect-secrets-hook`, then **verified by planting a fake AWS key and
-confirming the scan failed.** The rebuilt scans found a real CVE. A security
-control nobody has watched fail is not a control.
-
-### 7.6 A duplicate hosted zone, and an SPF record that would have broken mail
-
-The first apply created a *second* hosted zone for a domain that already had one.
-The nameservers reported back were the wrong set — delegation still pointed at the
-original zone, so nothing Terraform wrote was authoritative.
-
-Worse: `v=spf1 -all` was unconditional in that first version. Harmless in a zone
-Terraform had just created; **destructive in an adopted zone belonging to a domain
-that sends mail.** Fixed by §4.4 (adopt, don't create) and §4.5
-(`manage_email_dns` defaults off).
-
-### 7.7 `-var` beats `-var-file`
-
-Terraform resolves a command-line `-var` over any value in a `-var-file`. A
-variable set in both places silently takes the workflow's value. `ci.tfvars`
-carries a header saying so, and the workflow passes only the four values that
-are genuinely per-account or sensitive — `aws_region`, `domain_name`,
-`alert_email`, `existing_oidc_provider_arn`.
-
-### 7.8 A `for_each` keyed on a value that does not exist until apply
-
-Enabling the custom domain failed the plan with `Invalid for_each argument`. The
-ACM validation records were keyed on `dvo.resource_record_name`, which is
-`(known after apply)` on a first apply. `for_each` tolerates unknown *values* but
-not unknown *keys* — it cannot plan a number of instances it cannot count.
-
-Keyed on `domain_name` instead, which the provider fills from configuration and is
-therefore known at plan time, with `trimprefix(…, "*.")` so a wildcard SAN
-collapses onto the parent domain it shares a validation record with.
-
-### 7.9 A pull request was merged while its own plan was red
-
-The change in §7.8 shipped to `main` because its PR was merged without the plan
-check having passed — so `main` briefly held a configuration that could not plan.
-The gate existed and was not honoured.
-
-**This is the strongest argument in this document for a constitution.** Every other
-failure here was a knowledge gap, findable by reading a log. This one was a
-process failure, and no amount of care catches it reliably. It wants a branch
-protection rule.
-
-## 8. Follow-ups
+## 7. Follow-ups
 
 | # | Item | Blocks |
 | --- | --- | --- |
@@ -365,7 +270,7 @@ protection rule.
 | 2 | ~~Confirm the SNS email subscription~~ — done | OQ-2 |
 | 3 | Enable Cost Explorer in the Billing console | OQ-3 — FR-12 shows real numbers ~24h later |
 | 4 | Deployment branch policy on `production`, both repos | OQ-4 — restores the branch restriction §4.9 removed |
-| 5 | Require the checks to pass before merge | §7.9 |
+| 5 | Require the checks to pass before merge | Nothing else stops a red plan reaching `main` |
 | 6 | Decide whether the automation repo goes public | OQ-5 — the credibility argument depends on it |
 | 7 | Write the constitution these documents keep pointing at | all of the above |
 
