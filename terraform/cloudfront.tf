@@ -58,6 +58,52 @@ resource "aws_cloudfront_function" "rewrite_index" {
   JS
 }
 
+# TEMPORARY. Remove once the /api/* 404 is resolved.
+#
+# Everything readable about the API path is correct: the ordered behaviour is
+# live (Quantity 1), it targets the lambda origin, and the OAC, function URL
+# auth type and resource policy all match what AWS documents. The handler
+# answers 200 to a direct invoke, and the function URL answers 200 to a
+# correctly signed request. Yet UrlRequestCount shows CloudFront has never sent
+# a single request to that function URL.
+#
+# The public response cannot separate the two remaining explanations, because
+# the distribution maps both origin 403 and origin 404 to /404.html: a
+# behaviour that never matched and an origin that refused CloudFront produce
+# byte-identical replies. Attaching a marker response header would not help
+# either, since the error page is served by the default behaviour and carries
+# its policy.
+#
+# So answer it without an origin at all. This function is attached to /api/*
+# only and replies to one probe path from the edge itself. A 200 from it proves
+# the behaviour matched and moves the fault to the CloudFront-to-Lambda leg; the
+# 404 page proves the behaviour is not being applied. Every other path is
+# returned unchanged.
+resource "aws_cloudfront_function" "api_edge_probe" {
+  name    = "${local.name}-api-edge-probe"
+  runtime = "cloudfront-js-2.0"
+  comment = "Temporary: whether the /api/* behaviour is applied at the edge"
+  publish = true
+
+  code = <<-JS
+    function handler(event) {
+      if (event.request.uri === '/api/__edge-probe') {
+        return {
+          statusCode: 200,
+          statusDescription: 'OK',
+          headers: {
+            'content-type': { value: 'application/json' },
+            'cache-control': { value: 'no-store' }
+          },
+          body: '{"behaviour":"/api/*"}'
+        };
+      }
+
+      return event.request;
+    }
+  JS
+}
+
 resource "aws_cloudfront_response_headers_policy" "security" {
   name    = "${local.name}-security-headers"
   comment = "HSTS, CSP and friends for the static site"
@@ -175,6 +221,12 @@ resource "aws_cloudfront_distribution" "site" {
     # own Cache-Control headers, not at the edge.
     cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+
+    # Temporary, with the function above. Remove both together.
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.api_edge_probe.arn
+    }
   }
 
   # Gatsby builds a 404.html; S3 returns 403 for missing keys under OAC.
