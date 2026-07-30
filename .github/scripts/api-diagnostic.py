@@ -17,6 +17,7 @@ public, so its Actions logs are too.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import subprocess
@@ -59,6 +60,11 @@ def scrub(text: str) -> str:
 
 def show(label: str, value: object) -> None:
     print(f"    {label}: {scrub(str(value))}")
+
+
+def _iso(hours_ago: int) -> str:
+    moment = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours_ago)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def main() -> int:
@@ -308,6 +314,54 @@ def main() -> int:
     )
     if streams is not None:
         show("log streams", len(streams.get("logStreams", []) or []))
+
+    # Which log groups exist at all, and are any of them accumulating bytes?
+    print("\n== log groups under this project")
+    groups = aws(
+        "logs", "describe-log-groups",
+        "--log-group-name-prefix", f"/aws/lambda/{PROJECT}-",
+        "--region", REGION,
+    )
+    if groups:
+        for g in groups.get("logGroups", []) or []:
+            print(f"  - {g.get('logGroupName')}")
+            show("storedBytes", g.get("storedBytes"))
+
+    # Where does the function think it logs?
+    conf = aws(
+        "lambda", "get-function-configuration", "--function-name", fn, "--region", REGION
+    )
+    if conf:
+        print("\n== function logging configuration")
+        show("loggingConfig", conf.get("LoggingConfig") or "(default)")
+        show("role", conf.get("Role", "").split("/")[-1])
+
+    # --- the measurement that does not depend on logging ------------------
+    # Invocations is published by Lambda itself. If this is no more than the
+    # probes above, CloudFront has never successfully invoked the function --
+    # in fourteen hours of the site being live.
+    print("\n== Invocations metric, last 24h (independent of CloudWatch Logs)")
+    stats = aws(
+        "cloudwatch", "get-metric-statistics",
+        "--namespace", "AWS/Lambda",
+        "--metric-name", "Invocations",
+        "--dimensions", f"Name=FunctionName,Value={fn}",
+        "--start-time", _iso(hours_ago=24),
+        "--end-time", _iso(hours_ago=0),
+        "--period", "3600",
+        "--statistics", "Sum",
+        "--region", REGION,
+    )
+    if stats is not None:
+        points = sorted(
+            stats.get("Datapoints", []) or [], key=lambda d: d.get("Timestamp", "")
+        )
+        total = sum(p.get("Sum", 0) for p in points)
+        show("total invocations in 24h", total)
+        for p in points:
+            print(f"    | {p.get('Timestamp')}  sum={p.get('Sum')}")
+        if total <= 2:
+            print("    => only this job's probes. CloudFront has never invoked it.")
 
     print("\n== done")
     return 0
