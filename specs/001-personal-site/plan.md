@@ -331,9 +331,9 @@ that sends mail.** Fixed by §4.4 (adopt, don't create) and §4.5
 
 Terraform resolves a command-line `-var` over any value in a `-var-file`. A
 variable set in both places silently takes the workflow's value. `ci.tfvars`
-carries a header saying so, and the workflow passes only what is genuinely
-per-account or secret: `aws_region`, `domain_name`, `alert_email`,
-`existing_oidc_provider_arn`.
+carries a header saying so, and the workflow passes only the four values that
+are genuinely per-account or sensitive — `aws_region`, `domain_name`,
+`alert_email`, `existing_oidc_provider_arn`.
 
 ### 7.8 A `for_each` keyed on a value that does not exist until apply
 

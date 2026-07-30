@@ -1,0 +1,13 @@
+The MIT licence in LICENSE covers everything in this repository: Terraform,
+Lambda handlers, workflows, scripts, tests and the bootstrap template. Take it.
+
+It does not cover the written documents describing one person's work:
+
+  specs/001-personal-site/spec.md    all rights reserved
+  specs/001-personal-site/plan.md    all rights reserved
+
+Copyright (c) 2026 Jon Allyn.
+
+The reasoning in those documents is offered to be read and argued with, not
+republished as someone else's record. The code is the reusable part, and it is
+MIT.

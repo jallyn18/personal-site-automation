@@ -29,15 +29,26 @@ permissions:
   id-token: write        # required to mint the OIDC token
   pull-requests: write   # required to post the plan comment
 
-# Two independent regions, both resolved inline at each use rather than hoisted
-# into `env:` here. Workflow-level env has restricted context access, and an
-# expression that silently resolves to empty is worse than a repeated one: the
-# backend quietly falls back to the credentials region and S3 answers the
-# cross-region request with a 301 the SDK will not follow.
+# Regions are resolved inline at each use rather than hoisted into `env:` here.
+# Workflow-level env has restricted context access, and an expression that
+# silently resolves to empty is worse than a repeated one: the backend quietly
+# falls back to the credentials region and S3 answers the cross-region request
+# with a 301 the SDK will not follow. The state bucket's region is discovered
+# from the bucket itself, not configured -- see scripts/resolve-config.sh.
 #
-#   vars.AWS_REGION        where the infrastructure is created (default us-east-1)
-#   vars.TF_STATE_REGION   where the state bucket lives, i.e. whichever region
-#                          the bootstrap CloudFormation stack was deployed to
+# Values that embed the AWS account id are read as `secrets.X || vars.X`.
+#
+# Not because they are confidential -- an account id is not a secret, and these
+# were repository variables on purpose so they are visible and editable. It is
+# that secret masking is the *only* mechanism that redacts a value in a step's
+# own header. The runner prints `role-to-assume:` and a step's `env:` block
+# before the step runs, so no ::add-mask:: registered by our own script can
+# arrive in time. On a public repository those headers are world-readable.
+#
+# The `|| vars.X` fallback keeps the workflow working if the secret has not been
+# created yet. Once it has, delete the variable -- while both exist the secret
+# wins and the value is masked, but the variable is the thing that would leak if
+# the secret were ever removed.
 env:
   TF_VERSION: "1.13.3"
   TF_IN_AUTOMATION: "true"
@@ -89,7 +100,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN || vars.AWS_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           role-session-name: gha-terraform-plan-${{ github.run_id }}
 
@@ -101,15 +112,15 @@ jobs:
         id: config
         run: ./scripts/resolve-config.sh
         env:
-          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          AWS_OIDC_PROVIDER_ARN: ${{ vars.AWS_OIDC_PROVIDER_ARN }}
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+          AWS_OIDC_PROVIDER_ARN: ${{ secrets.AWS_OIDC_PROVIDER_ARN || vars.AWS_OIDC_PROVIDER_ARN }}
           DEPLOY_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
           DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
 
       - name: terraform init
         run: |
           terraform init -input=false \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
             -backend-config="region=${{ steps.config.outputs.state_region }}" \
             -backend-config="encrypt=true" \
@@ -125,7 +136,7 @@ jobs:
             -var="aws_region=${{ vars.AWS_REGION || 'us-east-1' }}" \
             -var="domain_name=${{ vars.DOMAIN_NAME }}" \
             -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
-            -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \
+            -var="existing_oidc_provider_arn=${{ secrets.AWS_OIDC_PROVIDER_ARN || vars.AWS_OIDC_PROVIDER_ARN }}" \
             -out=tfplan
           echo "exitcode=$?" >> "$GITHUB_OUTPUT"
         working-directory: terraform
@@ -175,7 +186,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN || vars.AWS_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           role-session-name: gha-terraform-apply-${{ github.run_id }}
 
@@ -187,15 +198,15 @@ jobs:
         id: config
         run: ./scripts/resolve-config.sh
         env:
-          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          AWS_OIDC_PROVIDER_ARN: ${{ vars.AWS_OIDC_PROVIDER_ARN }}
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+          AWS_OIDC_PROVIDER_ARN: ${{ secrets.AWS_OIDC_PROVIDER_ARN || vars.AWS_OIDC_PROVIDER_ARN }}
           DEPLOY_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
           DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
 
       - name: terraform init
         run: |
           terraform init -input=false \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
             -backend-config="region=${{ steps.config.outputs.state_region }}" \
             -backend-config="encrypt=true" \
@@ -211,6 +222,11 @@ jobs:
         run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
         working-directory: terraform
 
+      # The bucket name is deliberately not published here. It embeds the AWS
+      # account id, and a step summary is not covered by the log masking that
+      # resolve-config.sh registers -- ::add-mask:: filters logs, not summaries.
+      # On a public repository this page is world-readable. `terraform output`
+      # has the value for anyone who can already assume the role.
       - name: Publish outputs
         run: |
           {
@@ -220,6 +236,5 @@ jobs:
             echo '| --- | --- |'
             echo "| Site | $(terraform output -raw site_url) |"
             echo "| Distribution | $(terraform output -raw distribution_id) |"
-            echo "| Bucket | $(terraform output -raw site_bucket) |"
           } >> "$GITHUB_STEP_SUMMARY"
         working-directory: terraform

@@ -29,3 +29,12 @@ manage_email_dns = true
 # Delegation already points at the adopted zone, so certificate validation has
 # nothing to wait for.
 enable_custom_domain = true
+
+# Ceiling for this deployment, raised from the variable's default of 10.
+#
+# The budget's notifications are percentages of this number, so raising it moves
+# both alert points: 80% of actual is now $24 rather than $8, and the 100%
+# forecast alarm is now $30. Steady-state spend here is a small fraction of
+# that, which is the tradeoff -- more headroom before being told, and a runaway
+# has further to climb before the first warning. See monitoring.tf.
+monthly_budget_usd = 30
