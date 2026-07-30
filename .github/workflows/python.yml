@@ -1,13 +1,10 @@
 name: python
 
 on:
+  # No paths filter on pull_request. These jobs are required status checks, and
+  # a filtered-out required check blocks the pull request on a status that never
+  # arrives. See the note in terraform.yml.
   pull_request:
-    paths:
-      - "lambdas/**"
-      - "tests/**"
-      - "requirements-dev.txt"
-      - "pytest.ini"
-      - ".github/workflows/python.yml"
   push:
     branches: [main]
     paths:

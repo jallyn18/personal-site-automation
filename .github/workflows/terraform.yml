@@ -6,11 +6,16 @@ name: terraform
 # AWS credentials. There are no access keys in this repository's secrets.
 
 on:
+  # No paths filter on pull_request, deliberately.
+  #
+  # `plan` is a required status check on main. A required check that never runs
+  # because a path filter excluded it leaves the pull request waiting forever:
+  # GitHub cannot tell "this check does not apply here" apart from "this check
+  # has not finished yet", so it blocks on a status that will never arrive.
+  #
+  # Planning on every pull request costs about a minute and proves the change
+  # does not touch infrastructure. That is worth more than the minute.
   pull_request:
-    paths:
-      - "terraform/**"
-      - "lambdas/**"
-      - ".github/workflows/terraform.yml"
   push:
     branches: [main]
     paths:
