@@ -211,6 +211,11 @@ jobs:
         run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
         working-directory: terraform
 
+      # The bucket name is deliberately not published here. It embeds the AWS
+      # account id, and a step summary is not covered by the log masking that
+      # resolve-config.sh registers -- ::add-mask:: filters logs, not summaries.
+      # On a public repository this page is world-readable. `terraform output`
+      # has the value for anyone who can already assume the role.
       - name: Publish outputs
         run: |
           {
@@ -220,6 +225,5 @@ jobs:
             echo '| --- | --- |'
             echo "| Site | $(terraform output -raw site_url) |"
             echo "| Distribution | $(terraform output -raw distribution_id) |"
-            echo "| Bucket | $(terraform output -raw site_bucket) |"
           } >> "$GITHUB_STEP_SUMMARY"
         working-directory: terraform

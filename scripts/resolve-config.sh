@@ -23,6 +23,30 @@ fail() {
   exit 1
 }
 
+# Mask the AWS account id before anything is printed.
+#
+# On a public repository workflow logs are world-readable, and almost every
+# identifier this script handles embeds the account id: the state bucket name,
+# the OIDC provider ARN, the caller identity, and the failure messages below
+# that quote them back. AWS does not treat an account id as a secret, but it is
+# what turns "somebody's infrastructure" into "this account's infrastructure"
+# for anyone probing role and bucket names, and masking it costs nothing.
+#
+# add-mask only applies to the job that registers it, so every job calling this
+# script gets its own registration -- which is the point of doing it here.
+mask_account() {
+  # Exactly twelve digits, or it is not an account id and masking it would
+  # redact something we want to be able to read.
+  case "$1" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) echo "::add-mask::$1" ;;
+  esac
+}
+
+# From the ARN first, so the validation failures below are already masked even
+# when the credentials are broken and STS cannot answer.
+mask_account "$(printf '%s' "$oidc" | cut -d: -f5)"
+mask_account "$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || true)"
+
 if [ -z "$bucket" ]; then
   fail "TF_STATE_BUCKET is not set. Use the bootstrap stack's StateBucket output. If you set it, check it is a Repository variable rather than an Environment one -- environment-scoped variables are invisible to jobs without an 'environment:' key."
 fi

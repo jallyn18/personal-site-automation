@@ -92,6 +92,11 @@ Each of these was a real failure. Details in plan §7.
   local environment. Two separate failures came from pinning versions that do not
   exist (`aquasecurity/trivy-action@0.28.0`, `detect-secrets==1.5.47`).
 - **S3 `get-bucket-location` returns `None` for `us-east-1`.** Handle it.
+- **`::add-mask::` filters logs, not step summaries**, and it applies only to the
+  job that registers it. `resolve-config.sh` masks the account id for that
+  reason, in every job that calls it. Do not print the bucket name into
+  `$GITHUB_STEP_SUMMARY` — it embeds the account id and summaries are not
+  masked. This repository is public, so its logs and summaries are too.
 
 ## Working here
 
