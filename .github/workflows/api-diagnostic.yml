@@ -1,0 +1,55 @@
+name: api diagnostic
+
+# TEMPORARY, read-only. Delete once the /api/* 404 is understood.
+#
+# Every /api/* request currently comes back as the site's 404 page. From
+# outside the account that is all you can learn: the distribution maps both
+# origin 403 and origin 404 to /404.html, so a Function URL auth rejection and
+# a handler miss look identical to a caller. Terraform cannot be run locally
+# and the working environment has no AWS access, so Actions is the only way to
+# see the CloudFront -> Lambda leg.
+#
+# This job reads. It calls no mutating API.
+
+on:
+  # Not workflow_dispatch on a branch: the OIDC trust policy allows
+  # `repo:...:pull_request` and `refs/heads/main`, but not an arbitrary branch
+  # ref, so a dispatched run from this branch cannot assume the role.
+  #
+  # A paths filter is safe here only because this workflow is NOT a required
+  # status check. Adding one to terraform.yml or python.yml would deadlock
+  # every pull request that misses the filter -- see the note in terraform.yml.
+  pull_request:
+    paths:
+      - ".github/workflows/api-diagnostic.yml"
+      - ".github/scripts/api-diagnostic.py"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  diagnose:
+    name: diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN || vars.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          role-session-name: gha-api-diagnostic-${{ github.run_id }}
+
+      # Output goes to the log, never to $GITHUB_STEP_SUMMARY: ::add-mask::
+      # does not filter summaries, and this repository is public. The script
+      # redacts the account id and the function URL subdomain itself.
+      - name: Install signing dependencies
+        run: pip install --quiet boto3
+
+      - name: Diagnose
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          # Public in ci.tfvars; needed to check what the zone actually points at.
+          ROUTE53_ZONE_ID: Z03449763V0AE74DQS39J
+        run: python3 .github/scripts/api-diagnostic.py
