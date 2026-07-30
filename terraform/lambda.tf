@@ -224,3 +224,30 @@ resource "aws_lambda_permission" "cloudfront_invoke_api" {
   source_arn             = aws_cloudfront_distribution.site.arn
   function_url_auth_type = "AWS_IAM"
 }
+
+# The second statement is not redundant. AWS's own instructions for putting an
+# OAC in front of a function URL issue two add-permission calls, one for
+# lambda:InvokeFunctionUrl and one for lambda:InvokeFunction, and this stack
+# only ever had the first.
+#
+# That reads like belt and braces -- InvokeFunctionUrl is the action documented
+# for function URLs, and plenty of published examples grant only it -- but the
+# edge probe removed the alternatives. CloudFront does apply the /api/* cache
+# behaviour: /api/__edge-probe returns 200 from the edge with
+# x-cache: FunctionGeneratedResponse. The behaviour targets this origin, the OAC
+# is lambda/always/sigv4 and attached to it, the function URL is AWS_IAM and its
+# host matches the origin exactly, and a correctly signed request to that URL
+# returns 200. Requests through CloudFront still come back as the 404 page,
+# which is what the distribution turns an origin 403 into.
+#
+# Every hop is accounted for except this one difference from the documented
+# setup, so close it. Additive and scoped to the same distribution: it grants
+# nothing that the statement above does not already imply.
+resource "aws_lambda_permission" "cloudfront_invoke_api_function" {
+  statement_id           = "AllowCloudFrontOACInvokeFunction"
+  action                 = "lambda:InvokeFunction"
+  function_name          = aws_lambda_function.api.function_name
+  principal              = "cloudfront.amazonaws.com"
+  source_arn             = aws_cloudfront_distribution.site.arn
+  function_url_auth_type = "AWS_IAM"
+}
