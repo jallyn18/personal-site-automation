@@ -114,6 +114,43 @@ Plant the thing it is supposed to catch, confirm it catches it, remove the plant
 **Commit messages** explain why, in prose, wrapped at 72 characters. The diff
 already shows what changed.
 
+## Repository settings that cannot live in this repo
+
+These are real controls with no representation in the codebase, so they are
+written down here. If any of them is off, the corresponding guarantee elsewhere in
+this file is not actually enforced.
+
+**Default branch:** `main`.
+
+**Required status checks on `main`** — these are what stop plan §7.9 recurring:
+
+| Check | From |
+| --- | --- |
+| `fmt + validate` | `terraform.yml` |
+| `plan` | `terraform.yml` |
+| `IaC scan` | `security.yml` |
+| `Dependency scan` | `security.yml` |
+| `Secret scan` | `security.yml` |
+| `test (3.12)`, `test (3.13)` | `python.yml` |
+
+`apply` is **not** required — it only runs on push to `main` and is skipped on
+pull requests by design.
+
+Required checks and workflow path filters interact badly: a check excluded by a
+`paths` filter never reports, and the pull request blocks on it forever. This is
+why `terraform.yml` and `python.yml` have no `paths` filter on their
+`pull_request` trigger. **Adding one back will deadlock every pull request that
+does not touch the filtered paths.**
+
+**Deployment branch policy on the `production` environment:** restricted to
+`main`. This is not cosmetic. The OIDC trust policy must allow the
+`…:environment:production` subject claim (plan §4.9), and that claim *replaces*
+the branch in the token — so AWS cannot see which branch the job ran on, and IAM
+can no longer restrict applies to `main`. The environment's branch policy is what
+puts that restriction back, at the identity layer. Without it the only thing
+standing between any branch and a production apply is an `if:` condition in a
+file that any branch can edit.
+
 ## Current state
 
 Applied and live on `https://jon-allyn.com`, serving from the adopted hosted zone

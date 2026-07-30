@@ -362,9 +362,17 @@ protection rule.
 | # | Item | Blocks |
 | --- | --- | --- |
 | 1 | Fill the `TODO:` markers in `src/data/` | OQ-1 — the site's substance |
-| 2 | Confirm the SNS email subscription | OQ-2 — alarms fire into nothing until clicked |
+| 2 | ~~Confirm the SNS email subscription~~ — done | OQ-2 |
 | 3 | Enable Cost Explorer in the Billing console | OQ-3 — FR-12 shows real numbers ~24h later |
 | 4 | Deployment branch policy on `production`, both repos | OQ-4 — restores the branch restriction §4.9 removed |
-| 5 | Require the plan check to pass before merge | §7.9 |
+| 5 | Require the checks to pass before merge | §7.9 |
 | 6 | Decide whether the automation repo goes public | OQ-5 — the credibility argument depends on it |
 | 7 | Write the constitution these documents keep pointing at | all of the above |
+
+Items 4 and 5 have no representation in this repository — they are GitHub
+settings. The expected configuration is written down in
+[`CLAUDE.md`](../../CLAUDE.md) under "Repository settings that cannot live in this
+repo", so that a drift between intent and reality is at least *findable*. The
+workflow change that makes item 5 safe (removing `paths` filters from
+`pull_request` triggers, so a required check cannot be silently skipped) is in
+`terraform.yml` and `python.yml`.
