@@ -243,11 +243,16 @@ resource "aws_lambda_permission" "cloudfront_invoke_api" {
 # Every hop is accounted for except this one difference from the documented
 # setup, so close it. Additive and scoped to the same distribution: it grants
 # nothing that the statement above does not already imply.
+#
+# No function_url_auth_type here, unlike the statement above. AddPermission
+# rejects the pair outright -- "FunctionUrlAuthType is only supported for
+# lambda:InvokeFunctionUrl action" -- and AWS's own second command does not
+# pass it either. Terraform cannot catch this at plan time because the
+# validation happens in the Lambda API, so it surfaces as a failed apply.
 resource "aws_lambda_permission" "cloudfront_invoke_api_function" {
-  statement_id           = "AllowCloudFrontOACInvokeFunction"
-  action                 = "lambda:InvokeFunction"
-  function_name          = aws_lambda_function.api.function_name
-  principal              = "cloudfront.amazonaws.com"
-  source_arn             = aws_cloudfront_distribution.site.arn
-  function_url_auth_type = "AWS_IAM"
+  statement_id  = "AllowCloudFrontOACInvokeFunction"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api.function_name
+  principal     = "cloudfront.amazonaws.com"
+  source_arn    = aws_cloudfront_distribution.site.arn
 }
