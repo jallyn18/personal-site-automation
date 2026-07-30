@@ -32,7 +32,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_TERRAFORM_ROLE_ARN || vars.AWS_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           role-session-name: gha-drift-${{ github.run_id }}
 
@@ -44,15 +44,15 @@ jobs:
         id: config
         run: ./scripts/resolve-config.sh
         env:
-          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          AWS_OIDC_PROVIDER_ARN: ${{ vars.AWS_OIDC_PROVIDER_ARN }}
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+          AWS_OIDC_PROVIDER_ARN: ${{ secrets.AWS_OIDC_PROVIDER_ARN || vars.AWS_OIDC_PROVIDER_ARN }}
           DEPLOY_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
           DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
 
       - name: terraform init
         run: |
           terraform init -input=false \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}" \
             -backend-config="key=personal-site/terraform.tfstate" \
             -backend-config="region=${{ steps.config.outputs.state_region }}" \
             -backend-config="encrypt=true" \
@@ -69,7 +69,7 @@ jobs:
             -var="aws_region=${{ vars.AWS_REGION || 'us-east-1' }}" \
             -var="domain_name=${{ vars.DOMAIN_NAME }}" \
             -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
-            -var="existing_oidc_provider_arn=${{ vars.AWS_OIDC_PROVIDER_ARN }}" \
+            -var="existing_oidc_provider_arn=${{ secrets.AWS_OIDC_PROVIDER_ARN || vars.AWS_OIDC_PROVIDER_ARN }}" \
             > plan.txt 2>&1
           echo "exitcode=$?" >> "$GITHUB_OUTPUT"
         working-directory: terraform
