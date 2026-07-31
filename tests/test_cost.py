@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -137,6 +137,26 @@ class TestForecast:
 
 
 class TestHandler:
+    @pytest.fixture(autouse=True)
+    def frozen_clock(self, cost, monkeypatch):
+        """Pin the clock to mid-month for every test in this class.
+
+        handler() reads its reporting date from datetime.now(UTC), so without
+        this these tests depend on the day they happen to run. On the last day
+        of a month fetch_forecast correctly returns None -- the forecast window
+        is empty, which TestForecast already asserts for 2026-07-31 -- and every
+        assertion here about a forecast then fails. The code is right and the
+        calendar moved, which is the worst kind of red: it appears on an
+        unrelated pull request and implicates an innocent diff.
+        """
+
+        class _Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 7, 29, 12, 0, tzinfo=tz or UTC)
+
+        monkeypatch.setattr(cost, "datetime", _Frozen)
+
     def test_writes_a_snapshot(self, cost, ce, table):
         ce.groups = [group("Amazon Route 53", "0.50")]
         ce.forecast = "0.70"
