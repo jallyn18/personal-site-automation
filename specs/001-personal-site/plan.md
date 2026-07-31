@@ -273,6 +273,42 @@ for hermetic runs, and its 26 suppressions each carry a written reason.
 | 5 | Require the checks to pass before merge | Nothing else stops a red plan reaching `main` |
 | 6 | Decide whether the automation repo goes public | OQ-5 — the credibility argument depends on it |
 | 7 | Write the constitution these documents keep pointing at | all of the above |
+| 8 | Decide whether `/api/*` should be able to return its own errors | Nothing — accepted as-is, recorded below |
+
+### 7.1 `custom_error_response` flattens every error on `/api/*`
+
+`custom_error_response` is a property of the distribution, not of a cache
+behaviour, so the `403 -> /404.html` and `404 -> /404.html` mappings that give
+the static site its 404 page also rewrite anything the API returns as 403 or 404
+into an HTML page carrying a 404. There is no way to scope it to the default
+behaviour.
+
+This is recorded rather than fixed because it cost a full session once and will
+cost it again if the mechanism is not written down. Every failure mode on
+`/api/*` — a cache behaviour that never matched, a Function URL refusing
+CloudFront, a handler returning 404 — produces one byte-identical reply, so the
+status code carries no information while debugging that path. The missing
+`lambda:InvokeFunction` permission (§4, and the gotchas in `CLAUDE.md`) presented
+as "the API 404s" for exactly this reason.
+
+The options, none of which is obviously worth taking:
+
+- **Accept it.** What is masked is `/api/<unknown path>` and a genuine origin
+  403. The site's own client requests neither, and `/api/health` is an
+  unambiguous canary. This is the current position.
+- **Grant `s3:ListBucket` to the OAC principal and drop the 403 mapping.** S3
+  returns 403 rather than 404 for a missing key only because the caller cannot
+  list the bucket; with that permission it returns a real 404, which the
+  remaining mapping already handles. A genuine 403 would then reach the viewer
+  as a 403 — the signal that was hidden above. API 404s stay masked, so it fixes
+  half. Costs one statement on the bucket policy, scoped to the CloudFront
+  service principal with the existing `AWS:SourceArn` condition, which changes a
+  security control for a debugging benefit.
+- **Lambda@Edge on origin-response.** The only complete fix. CloudFront Functions
+  cannot do it: they run at viewer request, viewer response and connection
+  request only, and cannot set a response body, so they cannot turn an origin 403
+  into the 404 page. A replicated function and its deploy cycle are
+  disproportionate to a personal site.
 
 Items 4 and 5 have no representation in this repository — they are GitHub
 settings. The expected configuration is written down in
